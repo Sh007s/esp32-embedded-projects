@@ -199,3 +199,18 @@ void display_fill_rect(
             screen_buf);
     }
 }
+
+void display_draw_pixel(int x, int y, uint16_t color)
+{
+    color = rgb_to_panel(color);
+
+    uint16_t pixel = color;
+
+    esp_lcd_panel_draw_bitmap(
+        panel_handle,
+        x,
+        y,
+        x + 1,
+        y + 1,
+        &pixel);
+}
