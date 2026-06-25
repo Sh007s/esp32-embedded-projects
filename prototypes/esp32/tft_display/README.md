@@ -2,17 +2,18 @@
 
 ## Overview
 
-This project focuses on developing a custom TFT display driver for a 2.8-inch SPI TFT display using an ESP32 Dev Module and ESP-IDF.
+This project focuses on developing a custom TFT graphics library from scratch for a 2.8-inch SPI TFT display using an ESP32 Dev Module and ESP-IDF.
 
-The primary goal is to understand low-level display communication, color rendering, graphics primitives, and display driver development without relying on Arduino graphics libraries.
+The objective is to understand low-level graphics rendering, display driver development, RGB565 color processing, bitmap rendering, and graphics primitives without relying on Arduino graphics libraries such as Adafruit GFX or TFT_eSPI.
 
-This project serves as the foundation for future applications such as:
+This graphics library serves as the foundation for future embedded GUI applications including:
 
-- Bike dashboard display
-- ESP32-CAM image viewer
-- Robot status display
-- Touchscreen user interfaces
-- LVGL-based GUI applications
+* BikeVision Dashboard
+* ESP32-CAM Image Viewer
+* Robot Status Display
+* Touchscreen User Interface
+* LVGL Integration
+* Embedded Dashboard Applications
 
 ---
 
@@ -20,305 +21,318 @@ This project serves as the foundation for future applications such as:
 
 ## Display Information
 
-| Parameter | Value |
-|------------|---------|
-| Display Size | 2.8 Inch |
-| Resolution | 240 x 320 |
-| Interface | SPI |
-| Color Format | RGB565 |
-| Touch Controller | XPT2046 (Confirmed) |
-| LCD Controller | Under Investigation |
-
-The display currently operates correctly using the ESP-IDF ILI9341-compatible driver, but the actual LCD controller IC has not yet been positively identified.
-
----
-
-# ESP32 Connections
-
-| TFT Pin | ESP32 Pin |
-|----------|------------|
-| MOSI | GPIO23 |
-| MISO | GPIO19 |
-| SCK | GPIO18 |
-| CS | GPIO5 |
-| DC | GPIO21 |
-| RST | GPIO22 |
+| Parameter        | Value                             |
+| ---------------- | --------------------------------- |
+| Display Size     | 2.8 Inch                          |
+| Resolution       | 240 × 320                         |
+| Interface        | SPI                               |
+| Color Format     | RGB565                            |
+| Touch Controller | XPT2046                           |
+| Display Driver   | ESP-IDF ILI9341 Compatible Driver |
 
 ---
 
 # Development Environment
 
-- ESP-IDF v5.1.4
-- Visual Studio Code
-- Ubuntu Linux
-- ESP32 Dev Module
+* ESP-IDF v5.1.4
+* Visual Studio Code
+* Ubuntu Linux
+* ESP32 Dev Module
 
 ---
 
-# Features Implemented
+# Graphics Library Features
 
-## 1. Display Initialization
+## Display Driver
 
-Implemented display initialization using the ESP-IDF LCD framework.
+* Display Initialization
+* SPI Bus Configuration
+* Panel Reset
+* Display Enable
+* RGB565 Support
 
-Features:
-
-- SPI bus configuration
-- LCD panel initialization
-- Reset handling
-- Display enable sequence
-
-Verified successful communication between ESP32 and TFT display.
-
----
-
-## 2. Full Screen Color Rendering
-
-Implemented:
+Functions:
 
 ```c
+display_init();
 display_fill();
 ```
 
-Capabilities:
-
-- Full-screen color fill
-- RGB565 color support
-- DMA-based transfers
-
-Used to verify display functionality and color rendering.
-
 ---
 
-## 3. RGB565 Color Processing
+## Pixel Rendering
 
-Investigated and resolved color rendering issues.
-
-### Initial Behavior
-
-Observed incorrect color mapping:
-
-- Red displayed incorrectly
-- Green displayed incorrectly
-- Blue displayed incorrectly
-
-### Solution
-
-Implemented a custom RGB565 conversion routine:
+Functions:
 
 ```c
-static uint16_t rgb_to_panel(uint16_t color)
-{
-    uint16_t r = (color >> 11) & 0x1F;
-    uint16_t g = (color >> 5) & 0x3F;
-    uint16_t b = color & 0x1F;
-
-    return (b << 11) | (r << 5) | g;
-}
+display_draw_pixel();
 ```
 
-This corrected the color rendering behavior on the display.
+Features:
+
+* Individual pixel rendering
+* RGB565 color drawing
+* Foundation for all graphics primitives
 
 ---
 
-## 4. Rectangle Drawing
+## Line Rendering
+
+Functions:
+
+```c
+display_draw_hline();
+display_draw_vline();
+display_draw_line();
+```
+
+Implemented using Bresenham's Line Algorithm.
+
+Supports:
+
+* Horizontal lines
+* Vertical lines
+* Arbitrary angled lines
+
+---
+
+## Rectangle Rendering
+
+Functions:
+
+```c
+display_draw_rect();
+display_fill_rect();
+```
+
+Supports:
+
+* Rectangle outlines
+* Filled rectangles
+* Partial screen updates
+
+---
+
+## Circle Rendering
+
+Functions:
+
+```c
+display_draw_circle();
+display_fill_circle();
+```
+
+Implemented using the Midpoint Circle Algorithm.
+
+Supports:
+
+* Circle outlines
+* Filled circles
+
+---
+
+## Text Rendering (In Progress)
+
+Functions:
+
+```c
+display_draw_char();
+display_draw_string();
+```
+
+Current Features
+
+* 5×7 bitmap font
+* Character rendering
+* String rendering
+* RGB565 text color
+
+Planned
+
+* Complete ASCII font
+* Scalable fonts
+* Multiple font sizes
+* Text alignment
+* Integer rendering
+* Floating-point rendering
+
+---
+
+# RGB565 Color Processing
 
 Implemented:
 
 ```c
-display_fill_rect();
+rgb_to_panel();
 ```
-
-Capabilities:
-
-- Draw colored rectangles
-- Partial screen updates
-- Region-based rendering
-
-Used for graphics testing and color validation.
-
----
-
-## 5. Multi-Color Display Test
-
-Created test patterns to verify display operation.
-
-### Four Color Test
-
-- Red
-- Green
-- Blue
-- Yellow
-
-### Eight Color Test
-
-- Red
-- Green
-- Blue
-- Yellow
-- Cyan
-- Magenta
-- White
-- Black
-
-Used to validate:
-
-- RGB565 color rendering
-- Screen coordinate mapping
-- Rectangle drawing functions
-
----
-
-## 6. Interactive RGB565 Color Tester
-
-Developed a terminal-controlled color testing utility.
 
 Features:
 
-- User enters RGB565 values through terminal
-- Display updates immediately
-- RGB565 decimal value display
-- Hexadecimal value display
-- RGB component decoding
-
-Example:
-
-```text
-Enter Color: 63488
-
-Color = 63488 (0xF800)
-R = 31
-G = 0
-B = 0
-```
-
-The display then shows the selected color.
+* RGB565 conversion
+* RGB/BGR correction
+* Color decoding
+* Color validation
 
 ---
 
-# RGB565 Reference Colors
+# Graphics Testing
 
-| Color | Decimal | Hex |
-|---------|---------|---------|
-| Black | 0 | 0x0000 |
-| Blue | 31 | 0x001F |
-| Green | 2016 | 0x07E0 |
-| Cyan | 2047 | 0x07FF |
-| Red | 63488 | 0xF800 |
-| Magenta | 63519 | 0xF81F |
-| Yellow | 65504 | 0xFFE0 |
-| White | 65535 | 0xFFFF |
+Completed Tests
+
+* Full Screen Fill
+* RGB565 Color Test
+* Four Color Pattern
+* Eight Color Pattern
+* Rectangle Test
+* Line Test
+* Circle Test
+* Filled Circle Test
+* Character Rendering Test
+* String Rendering Test
+
+---
+
+# Interactive RGB565 Color Tester
+
+Implemented terminal-controlled color testing.
+
+Supports:
+
+* Decimal RGB565 input
+* Hexadecimal display
+* RGB component decoding
+* Real-time display updates
 
 ---
 
 # Technical Challenges Solved
 
-## Color Mapping Investigation
-
-Investigated:
-
-- RGB/BGR ordering
-- RGB565 bit layout
-- Display color conversion
-
-Implemented custom conversion logic to achieve correct color output.
-
----
-
-## Partial Screen Rendering
-
-Resolved issues involving:
-
-- Display orientation
-- Coordinate mapping
-- Rectangle rendering
+* SPI Communication
+* ESP-IDF LCD Driver Integration
+* RGB565 Color Conversion
+* Display Orientation
+* Coordinate Mapping
+* Partial Screen Rendering
+* Graphics Primitive Development
+* Character Bitmap Rendering
 
 ---
 
-## Interactive Console Input
+# Current Graphics Library
 
-Implemented terminal-based RGB565 testing utility.
+## Display
 
-Explored:
+```c
+display_init();
+display_fill();
+```
 
-- getchar()
-- fgets()
-- scanf()
-- ESP-IDF console behavior
+## Pixel
 
-Successfully created a color testing framework for rapid display validation.
+```c
+display_draw_pixel();
+```
 
----
+## Line
 
-# Future Improvements
+```c
+display_draw_hline();
+display_draw_vline();
+display_draw_line();
+```
 
-## Text Rendering
+## Rectangle
 
-Planned:
+```c
+display_draw_rect();
+display_fill_rect();
+```
 
-- Character drawing
-- String rendering
-- Custom bitmap fonts
+## Circle
 
-## Touchscreen Support
+```c
+display_draw_circle();
+display_fill_circle();
+```
 
-Planned:
+## Text
 
-- XPT2046 integration
-- Touch calibration
-- Touch event handling
-
-## Image Rendering
-
-Planned:
-
-- BMP display
-- RGB565 image arrays
-- JPEG decoding
-
-## GUI Development
-
-Planned:
-
-- LVGL integration
-- Buttons
-- Menus
-- Dashboard screens
-
-## Camera Integration
-
-Planned:
-
-- ESP32-CAM image display
-- Live preview support
+```c
+display_draw_char();
+display_draw_string();
+```
 
 ---
 
-# Project Status
+# Current Status
 
-### Completed
+## Completed
 
-- ESP32 ↔ TFT SPI Communication
-- Display Initialization
-- RGB565 Color Rendering
-- Full Screen Fill
-- Rectangle Drawing
-- Four Color Test Pattern
-- Eight Color Test Pattern
-- Interactive RGB565 Color Tester
-- RGB Component Decoder
+* Display Initialization
+* RGB565 Color Processing
+* Pixel Rendering
+* Horizontal Line Drawing
+* Vertical Line Drawing
+* General Line Drawing
+* Rectangle Drawing
+* Filled Rectangle Drawing
+* Circle Drawing
+* Filled Circle Drawing
+* Character Rendering
+* String Rendering
+* Graphics Validation Tests
 
-### In Progress
+## In Progress
 
-- Text Rendering
+* Complete ASCII Font
+* Bitmap Rendering
 
-### Planned
+## Planned
 
-- Touchscreen Support
-- Image Rendering
-- LVGL Integration
-- ESP32-CAM Integration
-- Bike Dashboard UI
+* Bitmap Rendering
+* RGB565 Image Rendering
+* Touchscreen Driver
+* JPEG/BMP Rendering
+* Animation Engine
+* Camera Frame Rendering
+* LVGL Integration
+* BikeVision Dashboard
+
+---
+
+# Future Roadmap
+
+### Phase 1
+
+* Complete Text Rendering
+
+### Phase 2
+
+* Bitmap Rendering
+
+### Phase 3
+
+* Image Rendering
+
+### Phase 4
+
+* Camera Rendering
+
+### Phase 5
+
+* Dashboard UI
+
+### Phase 6
+
+* Touchscreen Support
+
+### Phase 7
+
+* LVGL Integration
+
+### Phase 8
+
+* BikeVision Dashboard
 
 ---
 
@@ -326,4 +340,4 @@ Planned:
 
 **Shankar S**
 
-Custom TFT display driver development using ESP32 and ESP-IDF for embedded graphics, robotics, and dashboard applications.
+Developing a custom embedded graphics library using ESP-IDF for ESP32-based TFT displays with a focus on graphics rendering, embedded GUI development, robotics, and real-time dashboard applications.
