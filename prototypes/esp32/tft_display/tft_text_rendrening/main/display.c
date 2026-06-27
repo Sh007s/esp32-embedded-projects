@@ -88,9 +88,9 @@ void display_init(void)
     uint8_t pixfmt = 0x55; // RGB565
     esp_lcd_panel_io_tx_param(io_handle, 0x3A, &pixfmt, 1);
 
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle,true));                     
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, true));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle,true,false));                
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
     ESP_ERROR_CHECK(
         esp_lcd_panel_disp_on_off(
             panel_handle,
@@ -323,7 +323,7 @@ void display_fill_circle(int xc, int yc, int r, uint16_t color)
         }
     }
 }
-
+/*
 void display_draw_char(int x, int y, char c, uint16_t color)
 {
     const uint8_t *bitmap = NULL;
@@ -359,12 +359,45 @@ void display_draw_char(int x, int y, char c, uint16_t color)
         }
     }
 }
+*/
+
+void display_draw_char(int x, int y, char c, uint16_t color)
+{
+    /* Replace unsupported characters with SPACE */
+    if ((unsigned char)c < 32 || (unsigned char)c > 126)
+    {
+        c = ' ';
+    }
+
+    /* Get bitmap from ASCII table */
+    const uint8_t *bitmap = font5x7[(unsigned char)c - 32];
+
+    for (int col = 0; col < 5; col++)
+    {
+        for (int row = 0; row < 7; row++)
+        {
+            if (bitmap[col] & (1 << row))
+            {
+                /* Your display orientation */
+                display_draw_pixel(x + row, y + col, color);
+
+                /*
+                 * If you later change the display orientation,
+                 * you may instead use:
+                 *
+                 * display_draw_pixel(x + col, y + row, color);
+                 */
+            }
+        }
+    }
+}
+
 void display_draw_string(int x, int y, const char *str, uint16_t color)
 {
     while (*str)
     {
         display_draw_char(x, y, *str, color);
-        y += ;
+        y += 8;
         // x += 8;
 
         str++;
