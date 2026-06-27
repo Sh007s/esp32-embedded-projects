@@ -17,6 +17,7 @@ void display_draw_circle(int xc, int yc, int r, uint16_t color);
 void display_fill_circle(int xc, int yc, int r, uint16_t color);
 void display_draw_char(int x, int y, char c, uint16_t color);
 void display_draw_string(int x, int y, const char *str, uint16_t color);
+void display_draw_char_bg(int x, int y, char c, uint16_t text_color, uint16_t bg_color);
 
 #define TFT_BLACK 0x0000
 #define TFT_BLUE 0x001F

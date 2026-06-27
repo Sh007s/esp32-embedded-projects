@@ -403,3 +403,29 @@ void display_draw_string(int x, int y, const char *str, uint16_t color)
         str++;
     }
 }
+
+void display_draw_char_bg(int x, int y, char c, uint16_t text_color, uint16_t bg_color)
+{
+    // Check valid printable ASCII
+    if (c < 32 || c > 126)
+    {
+        c = ' ';
+    }
+
+    const uint8_t *bitmap = font5x7[c - 32];
+
+    for (int col = 0; col < 5; col++)
+    {
+        for (int row = 0; row < 7; row++)
+        {
+            if (bitmap[col] & (1 << row))
+            {
+                display_draw_pixel(x + row, y + col, text_color);
+            }
+            else
+            {
+                display_draw_pixel(x + row, y + col, bg_color);
+            }
+        }
+    }
+}
