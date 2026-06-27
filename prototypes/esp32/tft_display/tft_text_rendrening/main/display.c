@@ -429,3 +429,16 @@ void display_draw_char_bg(int x, int y, char c, uint16_t text_color, uint16_t bg
         }
     }
 }
+
+void display_draw_string_bg(int x, int y, const char *str, uint16_t text_color, uint16_t bg_color)
+{
+    while (*str)
+    {
+        display_draw_char_bg(x, y, *str, text_color, bg_color);
+
+        str++;
+
+        // Move to the next character
+        y += 6;
+    }
+}
