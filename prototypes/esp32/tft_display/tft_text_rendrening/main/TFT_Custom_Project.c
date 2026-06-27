@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -9,41 +8,55 @@ void app_main(void)
     display_init();
 
     display_fill(TFT_BLACK);
-    vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // // Normal text
-    // display_draw_string(20, 20, "display_draw_char()", TFT_WHITE);
+    /* Normal text */
+    display_draw_string(20, 20, "display_draw_string()", TFT_WHITE);
 
-    // display_draw_string(40, 40, "HELLO TFT", TFT_RED);
+    /* Background text */
+    display_draw_string_bg(40, 20, "display_draw_string_bg()", TFT_WHITE, TFT_RED);
 
-    // display_draw_string(60, 60, "Shankar S", TFT_GREEN);
+    /* Scaled text */
+    display_draw_string_scaled(60, 20, "Scale 1", TFT_GREEN, 1);
 
-    // display_draw_string(80, 80, "1234567890", TFT_CYAN);
+    display_draw_string_scaled(80, 20, "Scale 2", TFT_YELLOW, 2);
 
-    // display_draw_string(90, 80, "shal", TFT_CYAN);
+    display_draw_string_scaled(100, 20, "Scale 3", TFT_CYAN, 3);
 
-    // // Character with background
-    // display_draw_string(100, 110, "display_draw_char_bg()", TFT_YELLOW);
+    /* Character width */
+    uint16_t char_width = display_get_char_width();
 
-    // display_draw_char_bg(30, 5, 'A', TFT_WHITE, TFT_RED);
-    // display_draw_char_bg(40, 5, 'B', TFT_WHITE, TFT_GREEN);
-    // display_draw_char_bg(50, 5, 'C', TFT_WHITE, TFT_BLUE);
-    // display_draw_char_bg(60, 5, 'D', TFT_WHITE, TFT_YELLOW);
-    // display_draw_char_bg(70, 5, 'E', TFT_WHITE, TFT_MAGENTA);
+    display_draw_string(130, 20, "Char Width:", TFT_WHITE);
 
-    // display_draw_string_bg(20, 20, "HELLO TFT", TFT_WHITE, TFT_RED);
+    display_draw_char(130, 130, '0' + char_width, TFT_GREEN);
 
-    // display_draw_string_bg(40, 20, "ESP32", TFT_YELLOW, TFT_BLUE);
+    /* Character height */
+    uint16_t char_height = display_get_char_height();
 
-    // display_draw_string_bg(60, 20, "Shankar S", TFT_RED, TFT_YELLOW);
+    display_draw_string(150, 20, "Char Height:", TFT_WHITE);
 
-    display_draw_string_scaled(20, 20, "HELLO", TFT_WHITE, 1);
+    display_draw_char(150, 140, '0' + char_height, TFT_GREEN);
 
-    display_draw_string_scaled(40, 55, "HELLO", TFT_RED, 2);
+    /* String width */
+    uint16_t string_width = display_get_string_width("HELLO");
 
-    display_draw_string_scaled(80, 100, "HELLO", TFT_GREEN, 3);
+    display_draw_string(180, 20, "HELLO Width:", TFT_WHITE);
 
-    display_draw_string_scaled(110, 200, "HELLO", TFT_CYAN, 4);
+    if (string_width >= 10)
+    {
+        display_draw_char(180, 135, '0' + (string_width / 10), TFT_GREEN);
+
+        display_draw_char(180, 141, '0' + (string_width % 10), TFT_GREEN);
+    }
+    else
+    {
+        display_draw_char(180, 141, '0' + string_width, TFT_GREEN);
+    }
+
+    /* Center aligned */
+    display_draw_string_center(120, 180, "CENTER", TFT_MAGENTA);
+
+    /* Right aligned */
+    display_draw_string_right(220, 275, "RIGHT", TFT_BLUE);
 
     while (1)
     {

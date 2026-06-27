@@ -480,3 +480,59 @@ void display_draw_string_scaled(int x, int y, const char *str, uint16_t color, u
         y += (6 * scale);
     }
 }
+
+uint16_t display_get_char_width(void)
+{
+    return FONT_WIDTH + FONT_SPACING;
+}
+
+uint16_t display_get_char_height(void)
+{
+    return FONT_HEIGHT;
+}
+uint16_t display_get_string_width(const char *str)
+{
+    uint16_t width = 0;
+
+    while (*str)
+    {
+        width += display_get_char_width();
+        str++;
+    }
+
+    return width;
+}
+
+void display_draw_string_center(int x, int y ,    const char *str, uint16_t color)
+{
+    uint16_t width = display_get_string_width(str);
+
+    // Center along your text direction
+    y -= width / 2;
+
+    display_draw_string(x, y, str, color);
+}
+
+void display_draw_string_right( int x,int y,   const char *str,uint16_t color)
+{
+    uint16_t width = display_get_string_width(str);
+
+    y -= width;
+
+    display_draw_string(x, y, str, color);
+}
+
+void display_printf(int x,int y,uint16_t color,const char *fmt, ...)
+{
+    char buffer[128];
+
+    va_list args;
+
+    va_start(args, fmt);
+
+    vsnprintf(buffer,sizeof(buffer),fmt,args);
+
+    va_end(args);
+
+    display_draw_string( x, y,buffer,color);
+}
