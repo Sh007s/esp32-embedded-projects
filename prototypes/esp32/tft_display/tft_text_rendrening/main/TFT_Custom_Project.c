@@ -18,41 +18,32 @@ void app_main(void)
 
     // display_draw_string(60, 60, "Shankar S", TFT_GREEN);
 
-    display_draw_string(80, 80, "1234567890", TFT_CYAN);
+    // display_draw_string(80, 80, "1234567890", TFT_CYAN);
 
-    display_draw_string(90, 80, "shal", TFT_CYAN);
+    // display_draw_string(90, 80, "shal", TFT_CYAN);
 
-    // Character with background
-    display_draw_string(100, 110, "display_draw_char_bg()", TFT_YELLOW);
+    // // Character with background
+    // display_draw_string(100, 110, "display_draw_char_bg()", TFT_YELLOW);
 
-    display_draw_char_bg(30, 5, 'A', TFT_WHITE, TFT_RED);
-    display_draw_char_bg(40, 5, 'B', TFT_WHITE, TFT_GREEN);
-    display_draw_char_bg(50, 5, 'C', TFT_WHITE, TFT_BLUE);
-    display_draw_char_bg(60, 5, 'D', TFT_WHITE, TFT_YELLOW);
-    display_draw_char_bg(70, 5, 'E', TFT_WHITE, TFT_MAGENTA);
+    // display_draw_char_bg(30, 5, 'A', TFT_WHITE, TFT_RED);
+    // display_draw_char_bg(40, 5, 'B', TFT_WHITE, TFT_GREEN);
+    // display_draw_char_bg(50, 5, 'C', TFT_WHITE, TFT_BLUE);
+    // display_draw_char_bg(60, 5, 'D', TFT_WHITE, TFT_YELLOW);
+    // display_draw_char_bg(70, 5, 'E', TFT_WHITE, TFT_MAGENTA);
 
-    display_draw_string_bg(20, 20, "HELLO TFT", TFT_WHITE, TFT_RED);
+    // display_draw_string_bg(20, 20, "HELLO TFT", TFT_WHITE, TFT_RED);
 
-    display_draw_string_bg(40, 20, "ESP32", TFT_YELLOW, TFT_BLUE);
+    // display_draw_string_bg(40, 20, "ESP32", TFT_YELLOW, TFT_BLUE);
 
-    display_draw_string_bg(60, 20, "Shankar S", TFT_RED, TFT_YELLOW);
+    // display_draw_string_bg(60, 20, "Shankar S", TFT_RED, TFT_YELLOW);
 
-    // Test all printable ASCII
-    int x = 160;
-    int y = 120;
+    display_draw_string_scaled(20, 20, "HELLO", TFT_WHITE, 1);
 
-    for (char c = 32; c <= 126; c++)
-    {
-        display_draw_char_bg(x, y, c, TFT_WHITE, TFT_PINK);
+    display_draw_string_scaled(40, 55, "HELLO", TFT_RED, 2);
 
-        y += 8;
+    display_draw_string_scaled(80, 100, "HELLO", TFT_GREEN, 3);
 
-        if (y > 220)
-        {
-            y = 20;
-            x += 10;
-        }
-    }
+    display_draw_string_scaled(110, 200, "HELLO", TFT_CYAN, 4);
 
     while (1)
     {

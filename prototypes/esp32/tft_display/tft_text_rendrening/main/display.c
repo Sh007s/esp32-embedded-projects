@@ -442,3 +442,41 @@ void display_draw_string_bg(int x, int y, const char *str, uint16_t text_color, 
         y += 6;
     }
 }
+
+void display_draw_char_scaled(int x, int y, char c, uint16_t color, uint8_t scale)
+{
+    if (c < 32 || c > 126)
+        c = ' ';
+
+    const uint8_t *bitmap = font5x7[c - 32];
+
+    for (int col = 0; col < 5; col++)
+    {
+        for (int row = 0; row < 7; row++)
+        {
+            if (bitmap[col] & (1 << row))
+            {
+                for (int dx = 0; dx < scale; dx++)
+                {
+                    for (int dy = 0; dy < scale; dy++)
+                    {
+                        display_draw_pixel(x + row * scale + dx, y + col * scale + dy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void display_draw_string_scaled(int x, int y, const char *str, uint16_t color, uint8_t scale)
+{
+    while (*str)
+    {
+        display_draw_char_scaled(x, y, *str, color, scale);
+
+        str++;
+
+        // Next character
+        y += (6 * scale);
+    }
+}
