@@ -21,17 +21,29 @@ void app_main(void)
 
     // display_draw_bitmap(20, 120, BITMAP64_WIDTH, BITMAP64_HEIGHT, bitmap64x64);
 
-    display_draw_bitmap_scaled(20, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 1);
+    // display_draw_bitmap_scaled(20, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 1);
 
-    display_draw_bitmap_scaled(50, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 2);
+    // display_draw_bitmap_scaled(50, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 2);
 
-    display_draw_bitmap_scaled(90, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 4);
+    // display_draw_bitmap_scaled(90, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 4);
 
-    display_draw_bitmap_scaled(160, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 8);
+    // display_draw_bitmap_scaled(160, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 8);
 
-    display_draw_bitmap_scaled_bg(20, 100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 8, TFT_WHITE, TFT_RED);
+    // display_draw_bitmap_scaled_bg(20, 100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 8, TFT_WHITE, TFT_RED);
 
-    display_draw_bitmap_scaled_bg(120, 100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 4, TFT_BLUE, TFT_BLACK);
+    // display_draw_bitmap_scaled_bg(120, 100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 4, TFT_BLUE, TFT_BLACK);
+
+    display_draw_bitmap(10, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap);
+
+    display_draw_bitmap_center(60, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap);
+
+    display_draw_bitmap_right(100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap);
+
+    printf("Bitmap Width  : %d\n", display_get_bitmap_width(TEST_BITMAP_WIDTH));
+
+    printf("Bitmap Height : %d\n", display_get_bitmap_height(TEST_BITMAP_HEIGHT));
+
+    printf("Bitmap Pixels : %lu\n", display_get_bitmap_size(TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT));
 
     while (1)
     {

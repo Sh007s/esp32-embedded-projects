@@ -21,8 +21,8 @@
 #define PIN_NUM_DC 21
 #define PIN_NUM_RST 22
 
-#define LCD_H_RES 240
-#define LCD_V_RES 320
+#define LCD_H_RES      240
+#define LCD_V_RES      320
 #define BUFFER_LINES 20
 
 static esp_lcd_panel_handle_t panel_handle = NULL;

@@ -1,21 +1,21 @@
 #include "bitmap_data.h"
 #include "display.h"
 #include <stddef.h>
+#include <stdio.h>
 
 /*---------------------------------------------------------
  * 8x8 Test Bitmap
  *--------------------------------------------------------*/
 const uint16_t test_bitmap[TEST_BITMAP_WIDTH * TEST_BITMAP_HEIGHT] =
-{
-    TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,
-    TFT_RED,   TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_RED,
-    TFT_RED,   TFT_WHITE, TFT_BLUE,  TFT_BLUE,  TFT_BLUE,  TFT_BLUE,  TFT_WHITE, TFT_RED,
-    TFT_RED,   TFT_WHITE, TFT_BLUE,  TFT_GREEN, TFT_GREEN, TFT_BLUE,  TFT_WHITE, TFT_RED,
-    TFT_RED,   TFT_WHITE, TFT_BLUE,  TFT_GREEN, TFT_GREEN, TFT_BLUE,  TFT_WHITE, TFT_RED,
-    TFT_RED,   TFT_WHITE, TFT_BLUE,  TFT_BLUE,  TFT_BLUE,  TFT_BLUE,  TFT_WHITE, TFT_RED,
-    TFT_RED,   TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_RED,
-    TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED,   TFT_RED
-};
+    {
+        TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED,
+        TFT_RED, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_RED,
+        TFT_RED, TFT_WHITE, TFT_BLUE, TFT_BLUE, TFT_BLUE, TFT_BLUE, TFT_WHITE, TFT_RED,
+        TFT_RED, TFT_WHITE, TFT_BLUE, TFT_GREEN, TFT_GREEN, TFT_BLUE, TFT_WHITE, TFT_RED,
+        TFT_RED, TFT_WHITE, TFT_BLUE, TFT_GREEN, TFT_GREEN, TFT_BLUE, TFT_WHITE, TFT_RED,
+        TFT_RED, TFT_WHITE, TFT_BLUE, TFT_BLUE, TFT_BLUE, TFT_BLUE, TFT_WHITE, TFT_RED,
+        TFT_RED, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_RED,
+        TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED, TFT_RED};
 
 /*---------------------------------------------------------
  * Generated Bitmap Buffers
@@ -24,8 +24,7 @@ uint16_t bitmap16x16[BITMAP16_WIDTH * BITMAP16_HEIGHT];
 uint16_t bitmap32x32[BITMAP32_WIDTH * BITMAP32_HEIGHT];
 uint16_t bitmap64x64[BITMAP64_WIDTH * BITMAP64_HEIGHT];
 
-
-void display_draw_bitmap(int x,int y,int width,int height, const uint16_t *bitmap)
+void display_draw_bitmap(int x, int y, int width, int height, const uint16_t *bitmap)
 {
     if (bitmap == NULL)
     {
@@ -120,7 +119,6 @@ void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t 
         {
             uint16_t color = bitmap[row * width + col];
 
-
             if (color == transparent_color)
             {
                 display_draw_pixel(
@@ -139,7 +137,7 @@ void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t 
     }
 }
 
-void display_draw_bitmap_scaled(int x,int y,int width, int height, const uint16_t *bitmap, uint8_t scale)
+void display_draw_bitmap_scaled(int x, int y, int width, int height, const uint16_t *bitmap, uint8_t scale)
 {
     if (bitmap == NULL)
     {
@@ -171,7 +169,7 @@ void display_draw_bitmap_scaled(int x,int y,int width, int height, const uint16_
     }
 }
 
-void display_draw_bitmap_scaled_bg(int x,int y,  int width,int height,  const uint16_t *bitmap,uint8_t scale,uint16_t transparent_color,uint16_t bg_color)
+void display_draw_bitmap_scaled_bg(int x, int y, int width, int height, const uint16_t *bitmap, uint8_t scale, uint16_t transparent_color, uint16_t bg_color)
 {
     if (bitmap == NULL || scale == 0)
     {
@@ -201,4 +199,69 @@ void display_draw_bitmap_scaled_bg(int x,int y,  int width,int height,  const ui
             }
         }
     }
+}
+
+uint16_t display_get_bitmap_width(uint16_t width)
+{
+    return width;
+}
+
+uint16_t display_get_bitmap_height(uint16_t height)
+{
+    return height;
+}
+
+uint32_t display_get_bitmap_size(
+    uint16_t width,
+    uint16_t height)
+{
+    return (uint32_t)width * height;
+}
+
+void display_draw_bitmap_center(int y, int width, int height, const uint16_t *bitmap)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    int x = (DISPLAY_WIDTH - width) / 2;
+
+    printf("\n=== Bitmap Center ===\n");
+    printf("LCD Width  : %d\n", DISPLAY_WIDTH);
+    printf("Bitmap W   : %d\n", width);
+    printf("Bitmap H   : %d\n", height);
+    printf("Center X   : %d\n", x);
+    printf("Y Position : %d\n", y);
+
+    display_draw_bitmap(
+        x,
+        y,
+        width,
+        height,
+        bitmap);
+}
+
+void display_draw_bitmap_right(int y, int width, int height, const uint16_t *bitmap)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    int x = DISPLAY_WIDTH - width;
+
+    printf("\n=== Bitmap Center ===\n");
+    printf("LCD Width  : %d\n", DISPLAY_WIDTH);
+    printf("Bitmap W   : %d\n", width);
+    printf("Bitmap H   : %d\n", height);
+    printf("Center X   : %d\n", x);
+    printf("Y Position : %d\n", y);
+
+    display_draw_bitmap(
+        x,
+        y,
+        width,
+        height,
+        bitmap);
 }
