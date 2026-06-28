@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "TFT_Custom_Project.c"
+        "display.c"
+        "bitmap_data.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        driver
+        esp_lcd
+        espressif__esp_lcd_ili9341
+        console
+)
