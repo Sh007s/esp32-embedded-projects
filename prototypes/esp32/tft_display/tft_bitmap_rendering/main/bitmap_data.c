@@ -119,7 +119,7 @@ void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t 
         for (int col = 0; col < width; col++)
         {
             uint16_t color = bitmap[row * width + col];
-            
+
 
             if (color == transparent_color)
             {
@@ -134,6 +134,38 @@ void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t 
                     x + col,
                     y + row,
                     color);
+            }
+        }
+    }
+}
+
+void display_draw_bitmap_scaled(int x,int y,int width, int height, const uint16_t *bitmap, uint8_t scale)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    if (scale == 0)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color = bitmap[row * width + col];
+
+            for (int sy = 0; sy < scale; sy++)
+            {
+                for (int sx = 0; sx < scale; sx++)
+                {
+                    display_draw_pixel(
+                        x + (col * scale) + sx,
+                        y + (row * scale) + sy,
+                        color);
+                }
             }
         }
     }
