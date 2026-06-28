@@ -106,3 +106,35 @@ void generate_bitmap64(void)
         }
     }
 }
+
+void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t transparent_color, uint16_t bg_color)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color = bitmap[row * width + col];
+            
+
+            if (color == transparent_color)
+            {
+                display_draw_pixel(
+                    x + col,
+                    y + row,
+                    bg_color);
+            }
+            else
+            {
+                display_draw_pixel(
+                    x + col,
+                    y + row,
+                    color);
+            }
+        }
+    }
+}
