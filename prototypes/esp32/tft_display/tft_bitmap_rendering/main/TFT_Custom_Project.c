@@ -29,6 +29,10 @@ void app_main(void)
 
     display_draw_bitmap_scaled(160, 20, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 8);
 
+    display_draw_bitmap_scaled_bg(20, 100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 8, TFT_WHITE, TFT_RED);
+
+    display_draw_bitmap_scaled_bg(120, 100, TEST_BITMAP_WIDTH, TEST_BITMAP_HEIGHT, test_bitmap, 4, TFT_BLUE, TFT_BLACK);
+
     while (1)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));

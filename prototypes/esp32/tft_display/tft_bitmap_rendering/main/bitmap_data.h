@@ -33,6 +33,6 @@ void generate_bitmap64(void);
 void display_draw_bitmap(int x, int y, int width, int height, const uint16_t *bitmap);
 void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t transparent_color, uint16_t bg_color);
 void display_draw_bitmap_scaled(int x,int y,int width, int height, const uint16_t *bitmap, uint8_t scale);
-
+void display_draw_bitmap_scaled_bg(int x,int y,  int width,int height,  const uint16_t *bitmap,uint8_t scale,uint16_t transparent_color,uint16_t bg_color);
 
 #endif
