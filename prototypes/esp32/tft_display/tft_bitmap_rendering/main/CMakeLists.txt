@@ -3,6 +3,7 @@ idf_component_register(
         "TFT_Custom_Project.c"
         "display.c"
         "bitmap_data.c"
+        "image_data.c"
     INCLUDE_DIRS
         "."
     REQUIRES

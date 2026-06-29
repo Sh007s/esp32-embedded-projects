@@ -265,3 +265,24 @@ void display_draw_bitmap_right(int y, int width, int height, const uint16_t *bit
         height,
         bitmap);
 }
+
+void display_draw_rgb565_image(int x, int y, int width, int height,  const uint16_t *image)
+{
+    if (image == NULL)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color = image[row * width + col];
+
+            display_draw_pixel(
+                x + col,
+                y + row,
+                color);
+        }
+    }
+}

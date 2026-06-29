@@ -34,14 +34,13 @@ void generate_bitmap64(void);
 
 void display_draw_bitmap(int x, int y, int width, int height, const uint16_t *bitmap);
 void display_draw_bitmap_bg(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t transparent_color, uint16_t bg_color);
-void display_draw_bitmap_scaled(int x,int y,int width, int height, const uint16_t *bitmap, uint8_t scale);
-void display_draw_bitmap_scaled_bg(int x,int y,  int width,int height,  const uint16_t *bitmap,uint8_t scale,uint16_t transparent_color,uint16_t bg_color);
+void display_draw_bitmap_scaled(int x, int y, int width, int height, const uint16_t *bitmap, uint8_t scale);
+void display_draw_bitmap_scaled_bg(int x, int y, int width, int height, const uint16_t *bitmap, uint8_t scale, uint16_t transparent_color, uint16_t bg_color);
 uint16_t display_get_bitmap_width(uint16_t width);
 uint16_t display_get_bitmap_height(uint16_t height);
-uint32_t display_get_bitmap_size(uint16_t width,uint16_t height);
-void display_draw_bitmap_center(int y,int width,int height,const uint16_t *bitmap);
-void display_draw_bitmap_right(int y,int width,int height, const uint16_t *bitmap);
-
-
+uint32_t display_get_bitmap_size(uint16_t width, uint16_t height);
+void display_draw_bitmap_center(int y, int width, int height, const uint16_t *bitmap);
+void display_draw_bitmap_right(int y, int width, int height, const uint16_t *bitmap);
+void display_draw_rgb565_image(int x, int y, int width, int height, const uint16_t *image);
 
 #endif

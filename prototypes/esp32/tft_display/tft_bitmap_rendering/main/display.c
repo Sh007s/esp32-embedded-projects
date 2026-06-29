@@ -21,8 +21,8 @@
 #define PIN_NUM_DC 21
 #define PIN_NUM_RST 22
 
-#define LCD_H_RES      240
-#define LCD_V_RES      320
+#define LCD_H_RES 240
+#define LCD_V_RES 320
 #define BUFFER_LINES 20
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
@@ -495,3 +495,475 @@ void display_printf(int x, int y, uint16_t color, const char *fmt, ...)
     display_draw_string(x, y, buffer, color);
 }
 
+void display_draw_rgb565_image_scaled(int x, int y, int width, int height, int scale, const uint16_t *image)
+{
+    if (image == NULL || scale <= 0)
+        return;
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color = image[row * width + col];
+            display_fill_rect(x + col * scale, y + row * scale, scale, scale, color);
+        }
+    }
+}
+
+void display_push_pixels(int x, int y, int width, int height, const uint16_t *pixels)
+{
+    if (pixels == NULL)
+        return;
+    esp_lcd_panel_draw_bitmap(panel_handle, x, y, x + width, y + height, (void *)pixels);
+}
+
+void display_push_image(int x, int y, int width, int height, const uint16_t *image)
+{
+    display_push_pixels(x, y, width, height, image);
+}
+
+void display_draw_rgb565_image_fast(int x, int y, int width, int height, const uint16_t *image)
+{
+    display_push_image(x, y, width, height, image);
+}
+
+/* Uses the global esp_lcd_panel_handle_t created in display_init() */
+void display_set_window(int x, int y, int width, int height)
+{
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    /* Reserved for future optimisation.
+    esp_lcd_panel_draw_bitmap() already receives
+    the drawing window coordinates. */
+}
+void display_draw_icon(int x, int y, int width, int height, const uint16_t *icon)
+{
+    if (icon == NULL)
+        return;
+    display_push_image(x, y, width, height, icon);
+}
+void display_draw_icon_transparent(int x, int y, int width, int height, const uint16_t *icon, uint16_t transparent_color)
+{
+    if (icon == NULL)
+        return;
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t pixel = icon[row * width + col];
+            if (pixel != transparent_color)
+            {
+                display_draw_pixel(x + col, y + row, pixel);
+            }
+        }
+    }
+}
+
+void display_draw_sprite(int x, int y, int width, int height, const uint16_t *sprite)
+{
+    if (sprite == NULL)
+        return;
+    display_push_image(x, y, width, height, sprite);
+}
+void display_draw_sprite_transparent(int x, int y, int width, int height, const uint16_t *sprite, uint16_t transparent_color)
+{
+    if (sprite == NULL)
+        return;
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t pixel = sprite[row * width + col];
+            if (pixel != transparent_color)
+            {
+                display_draw_pixel(x + col, y + row, pixel);
+            }
+        }
+    }
+}
+
+esp_err_t display_draw_bmp(int x, int y, const char *filename)
+{
+    /* TODO:
+    1. Open BMP file.
+    2. Read header.
+    3. Convert pixels to RGB565 if required.
+    4. Call display_push_image().
+    */
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t display_draw_jpeg(int x, int y, const char *filename)
+{
+    /* TODO:
+    Decode JPEG using JPEGDEC or TinyJPEG.
+    Output RGB565 pixels.
+    Draw with display_push_image().
+    */
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t display_draw_png(int x, int y, const char *filename)
+{
+    /* TODO:
+    Decode PNG using LodePNG/libpng.
+    Convert to RGB565.
+    Draw with display_push_image().
+    */
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+void display_draw_bitmap_transparent(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t transparent_color)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color = bitmap[row * width + col];
+
+            if (color != transparent_color)
+            {
+                display_draw_pixel(x + col, y + row, color);
+            }
+        }
+    }
+}
+
+void display_draw_bitmap_flip_horizontal(int x, int y, int width, int height, const uint16_t *bitmap)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            display_draw_pixel(x + (width - 1 - col), y + row, bitmap[row * width + col]);
+        }
+    }
+}
+void display_draw_bitmap_flip_vertical(int x, int y, int width, int height, const uint16_t *bitmap)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            display_draw_pixel(x + col, y + (height - 1 - row), bitmap[row * width + col]);
+        }
+    }
+}
+void display_draw_bitmap_rotate(
+    int x,
+    int y,
+    int width,
+    int height,
+    const uint16_t *bitmap,
+    uint16_t angle)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    int row, col;
+
+    switch (angle)
+    {
+    case 0:
+
+        display_draw_bitmap(x, y, width, height, bitmap);
+        break;
+
+    case 90:
+
+        for (row = 0; row < height; row++)
+        {
+            for (col = 0; col < width; col++)
+            {
+                display_draw_pixel(
+                    x + (height - 1 - row),
+                    y + col,
+                    bitmap[row * width + col]);
+            }
+        }
+        break;
+
+    case 180:
+
+        for (row = 0; row < height; row++)
+        {
+            for (col = 0; col < width; col++)
+            {
+                display_draw_pixel(
+                    x + (width - 1 - col),
+                    y + (height - 1 - row),
+                    bitmap[row * width + col]);
+            }
+        }
+        break;
+
+    case 270:
+
+        for (row = 0; row < height; row++)
+        {
+            for (col = 0; col < width; col++)
+            {
+                display_draw_pixel(
+                    x + row,
+                    y + (width - 1 - col),
+                    bitmap[row * width + col]);
+            }
+        }
+        break;
+
+    default:
+
+        display_draw_bitmap(x, y, width, height, bitmap);
+        break;
+    }
+}
+/*
+void display_draw_bitmap_rotate(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t angle)
+{
+    if (bitmap == NULL)
+    {
+        return;
+    }
+
+    int row;
+    int col;
+
+    switch (angle)
+    {
+    case 0:
+
+        display_draw_bitmap(x, y, width, height, bitmap);
+
+        break;
+
+    case 90:
+
+        for (row = 0; row < height; row++)
+        {
+            for (col = 0; col < width; col++)
+            {
+                display_draw_pixel(x + (height - 1 - row), y + col, bitmap[row * width + col]);
+            }
+        }
+
+        break;
+
+    case 180:
+
+        for (row = 0; row < height; row++)
+        {
+            for (col = 0; col < width; col++)
+            {
+                display_draw_pixel(x + (width - 1 - col), y + (height - 1 - row), bitmap[row * width + col]);
+            }
+        }
+
+        break;
+
+    case 270:
+
+        for (row = 0; row < height; row++)
+        {
+            for (col = 0; col < width; col++)
+            {
+                display_draw_pixel(x + row, y + (width - 1 - col), bitmap[row * width + col]);
+            }
+        }
+
+        break;
+
+    default:
+
+        display_draw_bitmap(x, y, width, height, bitmap);
+
+        break;
+    }
+}
+    */
+/*
+void display_draw_bitmap_flip_horizontal_scaled(
+    int x,
+    int y,
+    int width,
+    int height,
+    const uint16_t *bitmap,
+    int scale)
+{
+    if (bitmap == NULL || scale <= 0)
+        return;
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color =
+                bitmap[row * width + (width - 1 - col)];
+
+            display_fill_rect(
+                x + col * scale,
+                y + row * scale,
+                scale,
+                scale,
+                color);
+        }
+    }
+}
+    */
+
+void display_draw_bitmap_flip_horizontal_scaled(
+    int x,
+    int y,
+    int width,
+    int height,
+    const uint16_t *bitmap,
+    int scale)
+{
+    if (bitmap == NULL || scale <= 0)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            /* Read mirrored source pixel */
+            uint16_t color = bitmap[row * width + (width - 1 - col)];
+
+            printf("row=%d col=%d -> x=%d y=%d color=0x%04X\n",
+                   row,
+                   col,
+                   x + col * scale,
+                   y + row * scale,
+                   color);
+
+            /* Draw one scaled pixel */
+            for (int sy = 0; sy < scale; sy++)
+            {
+                for (int sx = 0; sx < scale; sx++)
+                {
+                    display_draw_pixel(
+                        x + col * scale + sx,
+                        y + row * scale + sy,
+                        color);
+                }
+            }
+        }
+    }
+}
+
+void display_draw_bitmap_flip_vertical_scaled(
+    int x,
+    int y,
+    int width,
+    int height,
+    const uint16_t *bitmap,
+    int scale)
+{
+    if (bitmap == NULL || scale <= 0)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            /* Read vertically mirrored source pixel */
+            uint16_t color = bitmap[(height - 1 - row) * width + col];
+
+            /* Draw scaled pixel */
+            for (int sy = 0; sy < scale; sy++)
+            {
+                for (int sx = 0; sx < scale; sx++)
+                {
+                    display_draw_pixel(
+                        x + col * scale + sx,
+                        y + row * scale + sy,
+                        color);
+                }
+            }
+        }
+    }
+}
+
+void display_draw_bitmap_rotate_scaled(
+    int x,
+    int y,
+    int width,
+    int height,
+    const uint16_t *bitmap,
+    uint16_t angle,
+    int scale)
+{
+    if (bitmap == NULL || scale <= 0)
+    {
+        return;
+    }
+
+    for (int row = 0; row < height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            uint16_t color = bitmap[row * width + col];
+
+            int dst_x = col;
+            int dst_y = row;
+
+            switch (angle)
+            {
+            case 0:
+                dst_x = col;
+                dst_y = row;
+                break;
+
+            case 90:
+                dst_x = height - 1 - row;
+                dst_y = col;
+                break;
+
+            case 180:
+                dst_x = width - 1 - col;
+                dst_y = height - 1 - row;
+                break;
+
+            case 270:
+                dst_x = row;
+                dst_y = width - 1 - col;
+                break;
+
+            default:
+                dst_x = col;
+                dst_y = row;
+                break;
+            }
+
+            for (int sy = 0; sy < scale; sy++)
+            {
+                for (int sx = 0; sx < scale; sx++)
+                {
+                    display_draw_pixel(
+                        x + dst_x * scale + sx,
+                        y + dst_y * scale + sy,
+                        color);
+                }
+            }
+        }
+    }
+}
