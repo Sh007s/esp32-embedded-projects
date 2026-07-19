@@ -65,29 +65,8 @@ void display_draw_bitmap_rotate(int x, int y, int width, int height, const uint1
 void display_draw_bitmap_transparent(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t transparent_color);
 void display_draw_bitmap_flip_horizontal(int x, int y, int width, int height, const uint16_t *bitmap);
 void display_draw_bitmap_flip_vertical(int x, int y, int width, int height, const uint16_t *bitmap);
-void display_draw_bitmap_flip_horizontal_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    int scale);
-
-void display_draw_bitmap_flip_vertical_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    int scale);
-
-void display_draw_bitmap_rotate_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    uint16_t angle,
-    int scale);
+void display_draw_bitmap_flip_horizontal_scaled(int x, int y,int width,int height,const uint16_t *bitmap, int scale);
+void display_draw_bitmap_flip_vertical_scaled(int x,int y, int width,int height,  const uint16_t *bitmap,  int scale);
+void display_draw_bitmap_rotate_scaled( int x, int y,int width, int height,const uint16_t *bitmap,uint16_t angle, int scale);
 
 #endif

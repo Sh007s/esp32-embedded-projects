@@ -160,12 +160,7 @@ void display_gradient(void)
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
-void display_fill_rect(
-    int x,
-    int y,
-    int w,
-    int h,
-    uint16_t color)
+void display_fill_rect(int x, int y, int w, int h, uint16_t color)
 {
     color = rgb_to_panel(color);
 
@@ -498,13 +493,26 @@ void display_printf(int x, int y, uint16_t color, const char *fmt, ...)
 void display_draw_rgb565_image_scaled(int x, int y, int width, int height, int scale, const uint16_t *image)
 {
     if (image == NULL || scale <= 0)
+    {
         return;
+    }
+
     for (int row = 0; row < height; row++)
     {
         for (int col = 0; col < width; col++)
         {
             uint16_t color = image[row * width + col];
-            display_fill_rect(x + col * scale, y + row * scale, scale, scale, color);
+
+            for (int sy = 0; sy < scale; sy++)
+            {
+                for (int sx = 0; sx < scale; sx++)
+                {
+                    display_draw_pixel(
+                        x + (col * scale) + sx,
+                        y + (row * scale) + sy,
+                        color);
+                }
+            }
         }
     }
 }
@@ -663,13 +671,7 @@ void display_draw_bitmap_flip_vertical(int x, int y, int width, int height, cons
         }
     }
 }
-void display_draw_bitmap_rotate(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    uint16_t angle)
+void display_draw_bitmap_rotate(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t angle)
 {
     if (bitmap == NULL)
     {
@@ -733,106 +735,8 @@ void display_draw_bitmap_rotate(
         break;
     }
 }
-/*
-void display_draw_bitmap_rotate(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t angle)
-{
-    if (bitmap == NULL)
-    {
-        return;
-    }
 
-    int row;
-    int col;
-
-    switch (angle)
-    {
-    case 0:
-
-        display_draw_bitmap(x, y, width, height, bitmap);
-
-        break;
-
-    case 90:
-
-        for (row = 0; row < height; row++)
-        {
-            for (col = 0; col < width; col++)
-            {
-                display_draw_pixel(x + (height - 1 - row), y + col, bitmap[row * width + col]);
-            }
-        }
-
-        break;
-
-    case 180:
-
-        for (row = 0; row < height; row++)
-        {
-            for (col = 0; col < width; col++)
-            {
-                display_draw_pixel(x + (width - 1 - col), y + (height - 1 - row), bitmap[row * width + col]);
-            }
-        }
-
-        break;
-
-    case 270:
-
-        for (row = 0; row < height; row++)
-        {
-            for (col = 0; col < width; col++)
-            {
-                display_draw_pixel(x + row, y + (width - 1 - col), bitmap[row * width + col]);
-            }
-        }
-
-        break;
-
-    default:
-
-        display_draw_bitmap(x, y, width, height, bitmap);
-
-        break;
-    }
-}
-    */
-/*
-void display_draw_bitmap_flip_horizontal_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    int scale)
-{
-    if (bitmap == NULL || scale <= 0)
-        return;
-
-    for (int row = 0; row < height; row++)
-    {
-        for (int col = 0; col < width; col++)
-        {
-            uint16_t color =
-                bitmap[row * width + (width - 1 - col)];
-
-            display_fill_rect(
-                x + col * scale,
-                y + row * scale,
-                scale,
-                scale,
-                color);
-        }
-    }
-}
-    */
-
-void display_draw_bitmap_flip_horizontal_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    int scale)
+void display_draw_bitmap_flip_horizontal_scaled(int x, int y, int width, int height, const uint16_t *bitmap, int scale)
 {
     if (bitmap == NULL || scale <= 0)
     {
@@ -868,13 +772,7 @@ void display_draw_bitmap_flip_horizontal_scaled(
     }
 }
 
-void display_draw_bitmap_flip_vertical_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    int scale)
+void display_draw_bitmap_flip_vertical_scaled(int x, int y, int width, int height, const uint16_t *bitmap, int scale)
 {
     if (bitmap == NULL || scale <= 0)
     {
@@ -903,14 +801,7 @@ void display_draw_bitmap_flip_vertical_scaled(
     }
 }
 
-void display_draw_bitmap_rotate_scaled(
-    int x,
-    int y,
-    int width,
-    int height,
-    const uint16_t *bitmap,
-    uint16_t angle,
-    int scale)
+void display_draw_bitmap_rotate_scaled(int x, int y, int width, int height, const uint16_t *bitmap, uint16_t angle, int scale)
 {
     if (bitmap == NULL || scale <= 0)
     {
