@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
-        "TFT_Custom_Project.c"
         "display.c"
+        "text_rendrening.c"
     INCLUDE_DIRS
         "."
     REQUIRES

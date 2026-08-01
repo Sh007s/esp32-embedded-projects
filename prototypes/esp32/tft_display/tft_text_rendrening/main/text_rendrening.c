@@ -58,15 +58,15 @@ void app_main(void)
     // /* Right aligned */
     // display_draw_string_right(220, 275, "RIGHT", TFT_BLUE);
 
-    display_printf(20, 20, TFT_WHITE, "HELLO TFT");
+    display_printf(20, 0, TFT_WHITE, "HELLO TFT");
 
-    display_printf(40, 20, TFT_RED, "Speed : %d km/h", 80);
+    display_printf(40, 0, TFT_RED, "Speed : %d km/h", 80);
 
-    display_printf(60, 20, TFT_GREEN, "Temp : %.1f C", 27.5);
+    display_printf(60, 0, TFT_GREEN, "Temp : %.1f C", 27.5);
 
-    display_printf(80, 20, TFT_CYAN, "Battery : %d%%", 95);
+    display_printf(80, 0, TFT_CYAN, "Battery : %d%%", 95);
 
-    display_printf(100, 20, TFT_YELLOW, "Version : %s", "V1.0");
+    display_printf(100, 0, TFT_YELLOW, "Version : %s", "V1.0");
     
     while (1)
     {

@@ -88,9 +88,9 @@ void display_init(void)
     uint8_t pixfmt = 0x55; // RGB565
     esp_lcd_panel_io_tx_param(io_handle, 0x3A, &pixfmt, 1);
 
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, false));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, true));
     ESP_ERROR_CHECK(
         esp_lcd_panel_disp_on_off(
             panel_handle,
@@ -159,41 +159,85 @@ void display_gradient(void)
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
-void display_fill_rect(
-    int x,
-    int y,
-    int w,
-    int h,
-    uint16_t color)
+void display_fill_rect(int x, int y, int width, int height, uint16_t color)
 {
+    /* Invalid size */
+    if ((width <= 0) || (height <= 0))
+    {
+        return;
+    }
+
+    /* Completely outside the screen */
+    if ((x >= LCD_H_RES) || (y >= LCD_V_RES) ||
+        ((x + width) <= 0) || ((y + height) <= 0))
+    {
+        return;
+    }
+
+    /* Clip to display boundaries */
+    if (x < 0)
+    {
+        width += x;
+        x = 0;
+    }
+
+    if (y < 0)
+    {
+        height += y;
+        y = 0;
+    }
+
+    if ((x + width) > LCD_H_RES)
+    {
+        width = LCD_H_RES - x;
+    }
+
+    if ((y + height) > LCD_V_RES)
+    {
+        height = LCD_V_RES - y;
+    }
+
+    if ((width <= 0) || (height <= 0))
+    {
+        return;
+    }
+
     color = rgb_to_panel(color);
 
-    for (int i = 0; i < w * BUFFER_LINES; i++)
+    /* Fill DMA buffer */
+    for (int i = 0; i < (width * BUFFER_LINES); i++)
     {
         screen_buf[i] = color;
     }
 
-    for (int yy = y; yy < (y + h); yy += BUFFER_LINES)
+    /* Draw rectangle in BUFFER_LINES chunks */
+    for (int yy = y; yy < (y + height); yy += BUFFER_LINES)
     {
         int lines = BUFFER_LINES;
 
-        if ((yy + lines) > (y + h))
+        if ((yy + lines) > (y + height))
         {
-            lines = (y + h) - yy;
+            lines = (y + height) - yy;
         }
 
         esp_lcd_panel_draw_bitmap(
             panel_handle,
             x,
             yy,
-            x + w,
+            x + width,
             yy + lines,
             screen_buf);
     }
 }
-
 void display_draw_pixel(int x, int y, uint16_t color)
 {
+
+    if (x < 0 || x >= LCD_H_RES)
+        return;
+
+    if (y < 0 || y >= LCD_V_RES)
+        return;
+
     color = rgb_to_panel(color);
 
     uint16_t pixel = color;
@@ -207,14 +251,14 @@ void display_draw_pixel(int x, int y, uint16_t color)
         &pixel);
 }
 
-void display_draw_hline(int x, int y, int h, uint16_t color)
+void display_draw_hline(int x, int y, int width, uint16_t color)
 {
-    display_fill_rect(x, y, h, 1, color);
+    display_fill_rect(x, y, width, 1, color);
 }
 
-void display_draw_vline(int x, int y, int v, uint16_t color)
+void display_draw_vline(int x, int y, int height, uint16_t color)
 {
-    display_fill_rect(x, y, 1, v, color);
+    display_fill_rect(x, y, 1, height, color);
 }
 void display_draw_line(int x0, int y0, int x1, int y1, uint16_t color)
 {
@@ -503,7 +547,7 @@ uint16_t display_get_string_width(const char *str)
     return width;
 }
 
-void display_draw_string_center(int x, int y ,    const char *str, uint16_t color)
+void display_draw_string_center(int x, int y, const char *str, uint16_t color)
 {
     uint16_t width = display_get_string_width(str);
 
@@ -513,7 +557,7 @@ void display_draw_string_center(int x, int y ,    const char *str, uint16_t colo
     display_draw_string(x, y, str, color);
 }
 
-void display_draw_string_right( int x,int y,   const char *str,uint16_t color)
+void display_draw_string_right(int x, int y, const char *str, uint16_t color)
 {
     uint16_t width = display_get_string_width(str);
 
@@ -522,7 +566,7 @@ void display_draw_string_right( int x,int y,   const char *str,uint16_t color)
     display_draw_string(x, y, str, color);
 }
 
-void display_printf(int x,int y,uint16_t color,const char *fmt, ...)
+void display_printf(int x, int y, uint16_t color, const char *fmt, ...)
 {
     char buffer[128];
 
@@ -530,9 +574,9 @@ void display_printf(int x,int y,uint16_t color,const char *fmt, ...)
 
     va_start(args, fmt);
 
-    vsnprintf(buffer,sizeof(buffer),fmt,args);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
 
     va_end(args);
 
-    display_draw_string( x, y,buffer,color);
+    display_draw_string(x, y, buffer, color);
 }
