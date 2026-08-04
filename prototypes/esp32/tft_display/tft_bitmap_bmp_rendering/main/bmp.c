@@ -54,42 +54,27 @@ esp_err_t bmp_read_file_header(
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (fread(&file_header->signature,
-              sizeof(uint16_t),
-              1,
-              fp) != 1)
+    if (fread(&file_header->signature, sizeof(uint16_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&file_header->file_size,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&file_header->file_size, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&file_header->reserved1,
-              sizeof(uint16_t),
-              1,
-              fp) != 1)
+    if (fread(&file_header->reserved1, sizeof(uint16_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&file_header->reserved2,
-              sizeof(uint16_t),
-              1,
-              fp) != 1)
+    if (fread(&file_header->reserved2, sizeof(uint16_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&file_header->pixel_data_offset,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&file_header->pixel_data_offset, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
@@ -106,90 +91,57 @@ esp_err_t bmp_read_info_header(
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (fread(&info_header->header_size,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->header_size, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->width,
-              sizeof(int32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->width, sizeof(int32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->height,
-              sizeof(int32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->height, sizeof(int32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->planes,
-              sizeof(uint16_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->planes, sizeof(uint16_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->bits_per_pixel,
-              sizeof(uint16_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->bits_per_pixel, sizeof(uint16_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->compression,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->compression, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->image_size,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->image_size, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->x_pixels_per_meter,
-              sizeof(int32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->x_pixels_per_meter, sizeof(int32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->y_pixels_per_meter,
-              sizeof(int32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->y_pixels_per_meter, sizeof(int32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->colors_used,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->colors_used, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
 
-    if (fread(&info_header->important_colors,
-              sizeof(uint32_t),
-              1,
-              fp) != 1)
+    if (fread(&info_header->important_colors, sizeof(uint32_t), 1, fp) != 1)
     {
         return ESP_FAIL;
     }
@@ -291,8 +243,7 @@ esp_err_t bmp_validate(
  * Utility Functions
  * -------------------------------------------------------------------------- */
 
-uint32_t bmp_get_row_size(
-    uint32_t width)
+uint32_t bmp_get_row_size(uint32_t width)
 {
     /* 24-bit BMP rows are aligned to 4-byte boundaries */
     return ((width * 3U + 3U) & ~3U);
@@ -322,10 +273,7 @@ esp_err_t bmp_seek_pixel_data(
  * Image Functions
  * -------------------------------------------------------------------------- */
 
-esp_err_t bmp_read_row(
-    FILE *fp,
-    uint8_t *row_buffer,
-    uint32_t row_size)
+esp_err_t bmp_read_row(FILE *fp, uint8_t *row_buffer, uint32_t row_size)
 {
     if ((fp == NULL) ||
         (row_buffer == NULL))
@@ -343,14 +291,10 @@ esp_err_t bmp_read_row(
 
     return ESP_OK;
 }
-/*
-void bmp_rgb888_to_rgb565(
-    const uint8_t *src,
-    uint16_t *dst,
-    uint32_t width)
+
+void bmp_rgb888_to_rgb565(const uint8_t *src, uint16_t *dst, uint32_t width)
 {
-    if ((src == NULL) ||
-        (dst == NULL))
+    if ((src == NULL) || (dst == NULL))
     {
         return;
     }
@@ -367,46 +311,6 @@ void bmp_rgb888_to_rgb565(
             (blue >> 3);
     }
 }
-*/
-
-void bmp_rgb888_to_rgb565(
-    const uint8_t *src,
-    uint16_t *dst,
-    uint32_t width)
-{
-    if ((src == NULL) || (dst == NULL))
-    {
-        return;
-    }
-
-    for (uint32_t i = 0; i < width; i++)
-    {
-        /* BMP stores pixels as B, G, R */
-        uint8_t b = src[(i * 3U) + 0];
-        uint8_t g = src[(i * 3U) + 1];
-        uint8_t r = src[(i * 3U) + 2];
-
-        /* RGB565 components */
-        uint16_t r5 = (r >> 3) & 0x1F;
-        uint16_t g6 = (g >> 2) & 0x3F;
-        uint16_t b5 = (b >> 3) & 0x1F;
-
-        /* Convert directly to your panel format
-           Same as rgb_to_panel():
-           return (b << 11) | (r << 5) | g;
-        */
-        dst[i] = (b5 << 11) | (r5 << 5) | g6;
-    }
-}
-/* -------   // esp_err_t display_push_image(
-    //     int x,
-    //     int y,
-    //     int width,
-    //     int height,
-    //     const uint16_t *pixels);-------------------------------------------------------------------
- * Display Functions
- * -------------------------------------------------------------------------- */
-
 esp_err_t display_draw_bmp(int x, int y, const char *filename)
 {
 
@@ -462,20 +366,25 @@ esp_err_t display_draw_bmp(int x, int y, const char *filename)
         return ret;
     }
 
-    printf("Width  : %ld\n", info_header.width);
-    printf("Height : %ld\n", info_header.height);
-    printf("BPP    : %d\n", info_header.bits_per_pixel);
+    printf("\n----- FILE HEADER -----\n");
+    printf("Signature   : 0x%04X\n", file_header.signature);
+    printf("File Size   : %lu\n", file_header.file_size);
+    printf("Pixel Offset: %lu\n", file_header.pixel_data_offset);
+
+    printf("\n----- INFO HEADER -----\n");
+    printf("Header Size : %lu\n", info_header.header_size);
+    printf("Width       : %ld\n", info_header.width);
+    printf("Height      : %ld\n", info_header.height);
+    printf("Planes      : %d\n", info_header.planes);
+    printf("BPP         : %d\n", info_header.bits_per_pixel);
+    printf("Compression : %lu\n", info_header.compression);
+    printf("Image Size  : %lu\n", info_header.image_size);
 
     /* Validate */
     ret = bmp_validate(&file_header, &info_header);
     printf("bmp_validate() = %d\n", ret);
 
-    if (ret != ESP_OK) // esp_err_t display_push_image(
-    //     int x,
-    //     int y,
-    //     int width,
-    //     int height,
-    //     const uint16_t *pixels);
+    if (ret != ESP_OK) 
     {
         bmp_close(fp);
         return ret;
@@ -519,10 +428,21 @@ esp_err_t display_draw_bmp(int x, int y, const char *filename)
 
     for (int32_t row = 0; row < info_header.height; row++)
     {
-        ret = bmp_read_row(
-            fp,
-            row_buffer,
-            row_size);
+        ret = bmp_read_row(fp, row_buffer, row_size);
+
+        if (row == 0)
+        {
+            printf("First 5 pixels (B G R):\n");
+
+            for (int i = 0; i < 5; i++)
+            {
+                printf("%d: B=%3d G=%3d R=%3d\n",
+                       i,
+                       row_buffer[i * 3 + 0],
+                       row_buffer[i * 3 + 1],
+                       row_buffer[i * 3 + 2]);
+            }
+        }
 
         if (ret != ESP_OK)
         {
@@ -535,22 +455,34 @@ esp_err_t display_draw_bmp(int x, int y, const char *filename)
             return ret;
         }
 
-        bmp_rgb888_to_rgb565(
-            row_buffer,
-            rgb565_buffer,
-            info_header.width);
+        bmp_rgb888_to_rgb565(row_buffer, rgb565_buffer, info_header.width);
 
+        // // /* Reverse one row horizontally */
+        // for (int i = 0; i < info_header.width / 2; i++)
+        // {
+        //     uint16_t temp = rgb565_buffer[i];
+        //     rgb565_buffer[i] = rgb565_buffer[info_header.width - 1 - i];
+        //     rgb565_buffer[info_header.width - 1 - i] = temp;
+        // }
+        for (int i = 0; i < info_header.width; i++)
+        {
+            rgb565_buffer[i] = rgb_to_panel(rgb565_buffer[i]);
+        }
+
+        // /* Draw bottom-up BMP correctly on the display */
+        display_push_image(x, y + (row), info_header.width, 1, rgb565_buffer);
         /* Draw bottom-up BMP correctly on the display */
-        display_push_image(
-            x,
-            y + (info_header.height - 1 - row),
-            info_header.width,
-            1,
-            rgb565_buffer);
+        //  display_push_image(x, y + (info_header.height - 1 - row), info_header.width, 1, rgb565_buffer);
 
         if ((row % 20) == 0)
         {
             printf("Drawn Row : %ld\n", row);
+        }
+
+        if (row < 3)
+        {
+            printf("Display Push: X=%d Y=%ld Width=%ld Height=1\n", x, y + (info_header.height - 1 - row), info_header.width);
+            printf("Display Push: X=%d Y=%ld Width=%ld Height=1\n", x, y + row, info_header.width);
         }
     }
     printf("BMP Drawing Complete\n");

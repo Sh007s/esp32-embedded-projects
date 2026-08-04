@@ -30,9 +30,7 @@ static uint16_t *screen_buf = NULL;
 
 void display_init(void)
 {
-    screen_buf = heap_caps_malloc(
-        LCD_H_RES * BUFFER_LINES * sizeof(uint16_t),
-        MALLOC_CAP_DMA);
+    screen_buf = heap_caps_malloc(LCD_H_RES * BUFFER_LINES * sizeof(uint16_t), MALLOC_CAP_DMA);
 
     spi_bus_config_t buscfg = {
         .sclk_io_num = PIN_NUM_CLK,
@@ -70,41 +68,40 @@ void display_init(void)
 
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_NUM_RST,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-        .bits_per_pixel = 16,
-    };
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+        .bits_per_pixel = 16};
 
-    ESP_ERROR_CHECK(
-        esp_lcd_new_panel_ili9341(
-            io_handle,
-            &panel_config,
-            &panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_handle, &panel_config, &panel_handle));
 
-    ESP_ERROR_CHECK(
-        esp_lcd_panel_reset(panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
 
-    ESP_ERROR_CHECK(
-        esp_lcd_panel_init(panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
 
-    uint8_t pixfmt = 0x55; // RGB565
-    esp_lcd_panel_io_tx_param(io_handle, 0x3A, &pixfmt, 1);
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, false));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, true));
+    uint8_t madctl;
+    ESP_ERROR_CHECK(esp_lcd_panel_io_rx_param(io_handle, 0x36, &madctl, 1));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
-    ESP_ERROR_CHECK(
-        esp_lcd_panel_disp_on_off(
-            panel_handle,
-            true));
+    printf("MADCTL = 0x%02X\n", madctl);
+
+    // uint8_t pixfmt = 0x55; // RGB565
+    // esp_lcd_panel_io_tx_param(io_handle, 0x3A, &pixfmt, 1);
+
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, false));
+
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, true));
+
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 }
 
-static uint16_t rgb_to_panel(uint16_t color)
+uint16_t rgb_to_panel(uint16_t color)
 {
     uint16_t r = (color >> 11) & 0x1F;
     uint16_t g = (color >> 5) & 0x3F;
     uint16_t b = color & 0x1F;
 
     return (b << 11) | (r << 5) | g;
+    // return color;
 }
 
 void display_fill(uint16_t color)
@@ -160,29 +157,73 @@ void display_gradient(void)
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
-void display_fill_rect(int x, int y, int w, int h, uint16_t color)
+
+void display_fill_rect(int x, int y, int width, int height, uint16_t color)
 {
+    /* Invalid size */
+    if ((width <= 0) || (height <= 0))
+    {
+        return;
+    }
+
+    /* Completely outside the screen */
+    if ((x >= LCD_H_RES) || (y >= LCD_V_RES) ||
+        ((x + width) <= 0) || ((y + height) <= 0))
+    {
+        return;
+    }
+
+    /* Clip to display boundaries */
+    if (x < 0)
+    {
+        width += x;
+        x = 0;
+    }
+
+    if (y < 0)
+    {
+        height += y;
+        y = 0;
+    }
+
+    if ((x + width) > LCD_H_RES)
+    {
+        width = LCD_H_RES - x;
+    }
+
+    if ((y + height) > LCD_V_RES)
+    {
+        height = LCD_V_RES - y;
+    }
+
+    if ((width <= 0) || (height <= 0))
+    {
+        return;
+    }
+
     color = rgb_to_panel(color);
 
-    for (int i = 0; i < w * BUFFER_LINES; i++)
+    /* Fill DMA buffer */
+    for (int i = 0; i < (width * BUFFER_LINES); i++)
     {
         screen_buf[i] = color;
     }
 
-    for (int yy = y; yy < (y + h); yy += BUFFER_LINES)
+    /* Draw rectangle in BUFFER_LINES chunks */
+    for (int yy = y; yy < (y + height); yy += BUFFER_LINES)
     {
         int lines = BUFFER_LINES;
 
-        if ((yy + lines) > (y + h))
+        if ((yy + lines) > (y + height))
         {
-            lines = (y + h) - yy;
+            lines = (y + height) - yy;
         }
 
         esp_lcd_panel_draw_bitmap(
             panel_handle,
             x,
             yy,
-            x + w,
+            x + width,
             yy + lines,
             screen_buf);
     }
@@ -849,10 +890,7 @@ void display_draw_bitmap_rotate_scaled(int x, int y, int width, int height, cons
             {
                 for (int sx = 0; sx < scale; sx++)
                 {
-                    display_draw_pixel(
-                        x + dst_x * scale + sx,
-                        y + dst_y * scale + sy,
-                        color);
+                    display_draw_pixel(x + dst_x * scale + sx, y + dst_y * scale + sy, color);
                 }
             }
         }

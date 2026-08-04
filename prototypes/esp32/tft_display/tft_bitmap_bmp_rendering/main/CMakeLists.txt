@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-        "TFT_Custom_Project.c"
+        "main.c"
         "display.c"
         "bitmap_data.c"
         "image_data.c"

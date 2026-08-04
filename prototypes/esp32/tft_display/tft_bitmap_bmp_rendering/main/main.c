@@ -9,6 +9,7 @@
 void app_main(void)
 {
     display_init();
+    display_fill(TFT_BLACK);
 
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
@@ -28,25 +29,16 @@ void app_main(void)
 
     while (1)
     {
-        display_fill(TFT_ORANGE);
+        display_draw_bmp(0, 0, "/spiffs/red.bmp");
+        display_draw_string(25, 100, "RED", TFT_WHITE);
         vTaskDelay(pdMS_TO_TICKS(2000));
 
-        display_fill(TFT_BLUE);
+        display_draw_bmp(0, 0, "/spiffs/green.bmp");
+        display_draw_string(25, 100, "GREEN", TFT_WHITE);
         vTaskDelay(pdMS_TO_TICKS(2000));
 
-        display_fill(TFT_GREEN);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        display_fill(TFT_RED);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        display_fill(TFT_WHITE);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        display_fill(TFT_BLACK);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        display_draw_bmp(0, 0, "/spiffs/bmp_24.bmp");
+        display_draw_bmp(0, 0, "/spiffs/blue.bmp");
+        display_draw_string(25, 100, "BLUE", TFT_WHITE);
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
