@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "display.c"
+        "text_rendrening.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        driver
+        esp_lcd
+        espressif__esp_lcd_ili9341
+        console
+)

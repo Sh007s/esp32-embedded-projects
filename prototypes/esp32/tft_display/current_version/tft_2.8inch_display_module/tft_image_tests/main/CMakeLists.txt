@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "tft_image_tests.cpp"
+        "tft.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_timer
+        esp_system
+        freertos
+        driver
+        spiffs
+        esp_jpeg
+)
