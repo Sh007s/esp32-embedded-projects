@@ -381,9 +381,9 @@ void Test_GIF_File()
 
     const char *gifFiles[] =
         {
-        //  "/spiffs/birds.gif",
-        //      "/spiffs/clock.gif",
-         // "/spiffs/Radar.gif",
+          "/spiffs/birds.gif",
+             "/spiffs/clock.gif",
+        "/spiffs/Radar.gif",
            "/spiffs/tap.gif"
         };
 

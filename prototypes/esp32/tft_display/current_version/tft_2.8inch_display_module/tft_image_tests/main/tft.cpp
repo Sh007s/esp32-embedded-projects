@@ -113,8 +113,7 @@ void TFT::begin(uint8_t CS, uint8_t DC, uint8_t MOSI, uint8_t MISO,
 
     spi_device_interface_config_t devcfg = {};
 
-    devcfg.clock_speed_hz =
-        static_cast<int>(_freq);
+    devcfg.clock_speed_hz = static_cast<int>(_freq);
 
     devcfg.mode = 0;
 
@@ -133,6 +132,7 @@ void TFT::begin(uint8_t CS, uint8_t DC, uint8_t MOSI, uint8_t MISO,
         TAG,
         "Adding TFT SPI device at %lu Hz",
         (unsigned long)_freq);
+
 
     ESP_ERROR_CHECK(
         spi_bus_add_device(
@@ -1596,7 +1596,7 @@ bool TFT::drawBmpFile(const char *path,
             imageY =
                 (int32_t)fileRow;
         }
-
+                    
         // --------------------------------------------------------
         // Vertical crop
         // --------------------------------------------------------
@@ -2513,25 +2513,10 @@ bool TFT::drawGifFile(
 
     /*
      * ---------------------------------------------------------
-     * Allocate framebuffer.
+     * Framebuffer will be allocated after reading GIF header
+     * so the GIF logical size can be used for stride/height.
      * ---------------------------------------------------------
      */
-
-    if (!GIF_allocFrameBuffers())
-    {
-        ESP_LOGE(TAG,
-                 "GIF framebuffer allocation failed");
-
-        return false;
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * Clear framebuffer.
-     * ---------------------------------------------------------
-     */
-
-    GIF_clearFrameBuffer(TFT_BLACK);
 
     uint8_t iterations = repeat;
 
@@ -2606,6 +2591,17 @@ bool TFT::drawGifFile(
                  "GIF logical size: %ux%u",
                  gif_LogicalScreenWidth,
                  gif_LogicalScreenHeight);
+
+        /* Allocate framebuffer now that logical size is known */
+        if (!GIF_allocFrameBuffers())
+        {
+            ESP_LOGE(TAG, "GIF framebuffer allocation failed after reading header");
+            gif_file.close();
+            overallOK = false;
+            break;
+        }
+
+        GIF_clearFrameBuffer(TFT_BLACK);
 
         /*
          * -----------------------------------------------------
@@ -3285,118 +3281,197 @@ bool TFT::GIF_allocFrameBuffers()
         return true;
     }
 
-    const size_t pixels =
-        (size_t)TFT_WIDTH * TFT_HEIGHT;
+    /* Determine stride/height from GIF logical size when available. */
+    const uint16_t stride = (gif_LogicalScreenWidth != 0) ? gif_LogicalScreenWidth : (uint16_t)TFT_WIDTH;
+    const uint16_t height = (gif_LogicalScreenHeight != 0) ? gif_LogicalScreenHeight : (uint16_t)TFT_HEIGHT;
 
-    const size_t bufferSize =
-        pixels * sizeof(uint16_t);
+    const size_t pixels = (size_t)stride * height;
+    const size_t bufferSize = pixels * sizeof(uint16_t);
 
-    ESP_LOGI(TAG,
-             "Allocating GIF framebuffer: %u bytes",
-             (unsigned)bufferSize);
+    ESP_LOGI(TAG, "Allocating GIF framebuffer: %u bytes", (unsigned)bufferSize);
+    ESP_LOGI(TAG, "Free heap before allocation: %u", (unsigned)esp_get_free_heap_size());
 
-    ESP_LOGI(TAG,
-             "Free heap before allocation: %u",
-             (unsigned)esp_get_free_heap_size());
+    /* Try contiguous allocation in internal RAM first. */
+    gif_framebuffer = (uint16_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
 
-    /*
-     * Allocate from internal RAM.
-     */
-    gif_framebuffer =
-        (uint16_t *)heap_caps_malloc(
-            bufferSize,
-            MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-
+    /* If that fails, try PSRAM (if available). */
     if (gif_framebuffer == nullptr)
     {
-        ESP_LOGE(TAG,
-                 "GIF framebuffer allocation failed");
+        gif_framebuffer = (uint16_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+    }
 
-        ESP_LOGE(TAG,
-                 "Required: %u bytes",
-                 (unsigned)bufferSize);
+    /* If still failed, try any 8-bit capable heap. */
+    if (gif_framebuffer == nullptr)
+    {
+        gif_framebuffer = (uint16_t *)heap_caps_malloc(bufferSize, MALLOC_CAP_8BIT);
+    }
 
-        ESP_LOGE(TAG,
-                 "Free heap: %u bytes",
-                 (unsigned)esp_get_free_heap_size());
+    /* If contiguous allocation succeeded, clear and return. */
+    if (gif_framebuffer != nullptr)
+    {
+        memset(gif_framebuffer, 0, bufferSize);
 
-        ESP_LOGE(TAG,
-                 "Largest free block: %u bytes",
-                 (unsigned)heap_caps_get_largest_free_block(
-                     MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+        ESP_LOGI(TAG, "GIF framebuffer allocated: %u bytes (contiguous)", (unsigned)bufferSize);
+        ESP_LOGI(TAG, "Free heap after allocation: %u", (unsigned)esp_get_free_heap_size());
 
+        gif_framebuffer_stride = stride;
+        gif_framebuffer_height = height;
+
+        gif_framebuffer_row_alloc = false;
+
+        return true;
+    }
+
+    /* Contiguous allocation failed - fall back to per-row allocations.
+       This avoids the need for a single large contiguous block. */
+    ESP_LOGW(TAG, "Contiguous allocation failed; falling back to per-row allocation");
+
+    gif_framebuffer_rows = (uint16_t **)malloc((size_t)height * sizeof(uint16_t *));
+
+    if (gif_framebuffer_rows == nullptr)
+    {
+        ESP_LOGE(TAG, "Failed to allocate row pointer array");
         return false;
     }
 
-    /*
-     * Clear framebuffer.
-     */
-    memset(
-        gif_framebuffer,
-        0,
-        bufferSize);
+    bool ok = true;
+    for (uint16_t r = 0; r < height; ++r)
+    {
+        gif_framebuffer_rows[r] = (uint16_t *)malloc((size_t)stride * sizeof(uint16_t));
+        if (gif_framebuffer_rows[r] == nullptr)
+        {
+            ok = false;
+            /* free any rows we already allocated */
+            for (uint16_t j = 0; j < r; ++j)
+                free(gif_framebuffer_rows[j]);
+            free(gif_framebuffer_rows);
+            gif_framebuffer_rows = nullptr;
+            break;
+        }
+        /* clear row */
+        memset(gif_framebuffer_rows[r], 0, (size_t)stride * sizeof(uint16_t));
+    }
 
-    ESP_LOGI(TAG,
-             "GIF framebuffer allocated: %u bytes",
-             (unsigned)bufferSize);
+    if (!ok)
+    {
+        ESP_LOGE(TAG, "Per-row allocation failed");
+        return false;
+    }
 
-    ESP_LOGI(TAG,
-             "Free heap after allocation: %u",
-             (unsigned)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "GIF framebuffer allocated: %u rows x %u pixels (row-backed)", (unsigned)height, (unsigned)stride);
+
+    gif_framebuffer_stride = stride;
+    gif_framebuffer_height = height;
+    gif_framebuffer_row_alloc = true;
 
     return true;
 }
 
+uint16_t *TFT::GIF_getRowPtr(uint16_t row)
+{
+    if (gif_framebuffer_row_alloc && gif_framebuffer_rows != nullptr)
+    {
+        if (row < gif_framebuffer_height)
+            return gif_framebuffer_rows[row];
+        return nullptr;
+    }
+
+    if (gif_framebuffer != nullptr)
+    {
+        return gif_framebuffer + (size_t)row * gif_framebuffer_stride;
+    }
+
+    return nullptr;
+}
+
+uint16_t *TFT::GIF_getPrevRowPtr(uint16_t row)
+{
+    if (gif_previous_frame_row_alloc && gif_previous_frame_rows != nullptr)
+    {
+        if (row < gif_framebuffer_height)
+            return gif_previous_frame_rows[row];
+        return nullptr;
+    }
+
+    if (gif_previous_frame != nullptr)
+    {
+        return gif_previous_frame + (size_t)row * gif_framebuffer_stride;
+    }
+
+    return nullptr;
+}
+
 void TFT::GIF_clearFrameBuffer(uint16_t color)
 {
+    const size_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+    const size_t height = (gif_framebuffer_height != 0) ? gif_framebuffer_height : TFT_HEIGHT;
+
+    if (gif_framebuffer_row_alloc && gif_framebuffer_rows != nullptr)
+    {
+        for (size_t r = 0; r < height; ++r)
+        {
+            for (size_t c = 0; c < stride; ++c)
+                gif_framebuffer_rows[r][c] = color;
+        }
+        return;
+    }
+
     if (gif_framebuffer == nullptr)
         return;
 
-    const size_t pixels =
-        (size_t)TFT_WIDTH * TFT_HEIGHT;
-
+    const size_t pixels = stride * height;
     for (size_t i = 0; i < pixels; i++)
-    {
         gif_framebuffer[i] = color;
-    }
 }
 
 void TFT::GIF_freeFrameBuffers()
 {
-    /*
-     * ---------------------------------------------------------
-     * Keep the main GIF framebuffer allocated.
-     *
-     * It is 320 x 240 x 2 = 153600 bytes.
-     *
-     * Repeatedly freeing and reallocating this large block
-     * causes heap fragmentation and prevents the next GIF
-     * from getting a large contiguous block.
-     * ---------------------------------------------------------
-     */
-
-    if (gif_framebuffer != nullptr)
+    /* Free main framebuffer so it can be reallocated for a new GIF size. */
+    if (gif_framebuffer_row_alloc && gif_framebuffer_rows != nullptr)
     {
-        ESP_LOGI(
-            "TFT_GIF",
-            "Keeping GIF framebuffer allocated");
+        for (uint16_t r = 0; r < gif_framebuffer_height; ++r)
+        {
+            if (gif_framebuffer_rows[r] != nullptr)
+                free(gif_framebuffer_rows[r]);
+        }
+        free(gif_framebuffer_rows);
+        gif_framebuffer_rows = nullptr;
+        gif_framebuffer_row_alloc = false;
+        gif_framebuffer_stride = 0;
+        gif_framebuffer_height = 0;
+
+        ESP_LOGI("TFT_GIF", "GIF framebuffer (row-backed) freed");
+    }
+    else if (gif_framebuffer != nullptr)
+    {
+        heap_caps_free(gif_framebuffer);
+        gif_framebuffer = nullptr;
+        gif_framebuffer_stride = 0;
+        gif_framebuffer_height = 0;
+
+        ESP_LOGI("TFT_GIF", "GIF framebuffer freed");
     }
 
-    /*
-     * ---------------------------------------------------------
-     * Previous-frame buffer is separate.
-     * Free it if it is being used.
-     * ---------------------------------------------------------
-     */
+    /* Free previous-frame buffer if present. */
+    if (gif_previous_frame_row_alloc && gif_previous_frame_rows != nullptr)
+    {
+        for (uint16_t r = 0; r < gif_framebuffer_height; ++r)
+        {
+            if (gif_previous_frame_rows[r] != nullptr)
+                free(gif_previous_frame_rows[r]);
+        }
+        free(gif_previous_frame_rows);
+        gif_previous_frame_rows = nullptr;
+        gif_previous_frame_row_alloc = false;
 
-    if (gif_previous_frame != nullptr)
+        ESP_LOGI("TFT_GIF", "GIF previous-frame (row-backed) buffer freed");
+    }
+    else if (gif_previous_frame != nullptr)
     {
         free(gif_previous_frame);
         gif_previous_frame = nullptr;
 
-        ESP_LOGI(
-            "TFT_GIF",
-            "GIF previous-frame buffer freed");
+        ESP_LOGI("TFT_GIF", "GIF previous-frame buffer freed");
     }
 }
 #if 0
@@ -3404,7 +3479,7 @@ void TFT::GIF_displayFrame()
 {
     static const char *TAG = "TFT_GIF";
 
-    if (gif_framebuffer == nullptr)
+    if (gif_framebuffer == nullptr && !(gif_framebuffer_row_alloc && gif_framebuffer_rows != nullptr))
     {
         ESP_LOGE(TAG, "GIF framebuffer is NULL");
         return;
@@ -3501,7 +3576,8 @@ void TFT::GIF_displayFrame()
 
             uint32_t srcIndex = (uint32_t)srcY * srcW + srcX;
 
-            buffer[i] = gif_framebuffer[srcIndex];
+            uint16_t *rowPtr = GIF_getRowPtr(srcY);
+            buffer[i] = (rowPtr != nullptr) ? rowPtr[srcX] : 0;
         }
 
         /*
@@ -3528,17 +3604,21 @@ void TFT::GIF_displayFrame()
 {
     static const char *TAG = "TFT_GIF";
 
-    if (gif_framebuffer == nullptr)
+    if (gif_framebuffer == nullptr && !(gif_framebuffer_row_alloc && gif_framebuffer_rows != nullptr))
     {
         ESP_LOGE(TAG, "GIF framebuffer is NULL");
         return;
     }
 
-    constexpr uint16_t srcW = 240;
-    constexpr uint16_t srcH = 320;
+    /*
+     * Source: use GIF logical screen size when available.
+     * Destination: current TFT size.
+     */
+    const uint16_t srcW = (gif_LogicalScreenWidth != 0) ? gif_LogicalScreenWidth : (uint16_t)TFT_WIDTH;
+    const uint16_t srcH = (gif_LogicalScreenHeight != 0) ? gif_LogicalScreenHeight : (uint16_t)TFT_HEIGHT;
 
-    constexpr uint16_t dstW = 320;
-    constexpr uint16_t dstH = 240;
+    const uint16_t dstW = (uint16_t)_width;
+    const uint16_t dstH = (uint16_t)_height;
 
     constexpr uint16_t BUFFER_PIXELS = 1024;
 
@@ -3574,48 +3654,69 @@ void TFT::GIF_displayFrame()
      * row at a time.
      */
 
-    for (uint16_t dstY = 0;
-         dstY < dstH;
-         dstY++)
+    /*
+     * Two common cases:
+     * 1) Source == destination (no rotation)
+     * 2) Source is rotated 90deg (srcW==dstH && srcH==dstW)
+     *
+     * For the rotated case we map pixels from the source
+     * using the 90-degree transform. Otherwise, if the
+     * source matches the TFT size, write the framebuffer
+     * directly for best performance.
+     */
+    if (srcW == dstW && srcH == dstH)
     {
-        /*
-         * For this destination row:
-         *
-         * srcX is fixed.
-         */
-        const uint16_t srcX = dstY;
-
-        /*
-         * Start at the bottom source row.
-         */
-        const uint16_t *src =
-            gif_framebuffer +
-            ((uint32_t)(srcH - 1) * srcW) +
-            srcX;
-
-        uint16_t *dst = buffer;
-
-        /*
-         * Destination X increases.
-         *
-         * Source Y decreases.
-         *
-         * Therefore move backwards by srcW
-         * for every pixel.
-         */
-        for (uint16_t dstX = 0;
-             dstX < dstW;
-             dstX++)
+        /* Direct copy (row-major source) */
+        /* src stride might equal dstW; write row-by-row to be safe */
+        const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+        for (uint16_t y = 0; y < dstH; ++y)
         {
-            *dst++ = *src;
-
-            src -= srcW;
+            const uint16_t *rowPtr = GIF_getRowPtr(y);
+            if (rowPtr)
+                writePixels(const_cast<uint16_t *>(rowPtr), dstW);
+            else
+            {
+                uint16_t tmp = 0;
+                writePixels(&tmp, 1);
+            }
         }
+    }
+    else if (srcW == dstH && srcH == dstW)
+    {
+        /* Rotated 90 degrees clockwise: srcX = dstY, srcY = srcH - 1 - dstX */
+        for (uint16_t dstY = 0; dstY < dstH; dstY++)
+        {
+            const uint16_t srcX = dstY;
 
-        /*
-         * Send complete destination row.
-         */
-        writePixels(buffer, dstW);
+            const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+
+            uint16_t *dst = buffer;
+
+            for (uint16_t dstX = 0; dstX < dstW; dstX++)
+            {
+                uint16_t srcY = srcH - 1 - dstX;
+                uint16_t *rowPtr = GIF_getRowPtr(srcY);
+                uint16_t pix = (rowPtr != nullptr) ? rowPtr[srcX] : 0;
+                *dst++ = pix;
+            }
+
+            writePixels(buffer, dstW);
+        }
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Unexpected GIF size %ux%u, TFT %ux%u - attempting best-effort display",
+                 srcW, srcH, dstW, dstH);
+        /* Best-effort: write the TFT-sized portion line-by-line from framebuffer stride */
+        {
+            const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+            for (uint16_t y = 0; y < dstH; ++y)
+            {
+                const uint16_t *rowPtr = GIF_getRowPtr(y);
+                if (rowPtr)
+                    writePixels(const_cast<uint16_t *>(rowPtr), dstW);
+            }
+        }
     }
 
     endWrite();
@@ -3654,6 +3755,76 @@ bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
     ESP_LOGI(TAG, "GIF_ReadImage: frame=%ux%u at %u,%u", srcW, srcH, frameX, frameY);
 
     /* ---------------------------------------------------------
+       Apply disposal for previous frame (if any)
+       --------------------------------------------------------- */
+    if (gif_prev_width && gif_prev_height)
+    {
+        switch (gif_prev_disposal)
+        {
+        case 2: // Restore to background
+        {
+            uint16_t bg = TFT_BLACK;
+            if (!gif_GlobalColorTable.empty() && gif_BackgroundColorIndex < gif_GlobalColorTable.size())
+            {
+                bg = gif_GlobalColorTable[gif_BackgroundColorIndex];
+            }
+
+            const uint16_t left = gif_prev_left;
+            const uint16_t top = gif_prev_top;
+            const uint16_t right = left + gif_prev_width;
+            const uint16_t bottom = top + gif_prev_height;
+
+            const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+            const uint16_t height = (gif_framebuffer_height != 0) ? gif_framebuffer_height : TFT_HEIGHT;
+
+            for (uint16_t ry = top; ry < bottom && ry < height; ++ry)
+            {
+                uint16_t *rowPtr = GIF_getRowPtr(ry);
+                if (!rowPtr)
+                    continue;
+                for (uint16_t rx = left; rx < right && rx < stride; ++rx)
+                {
+                    rowPtr[rx] = bg;
+                }
+            }
+            break;
+        }
+        case 3: // Restore to previous
+        {
+            if (gif_previous_frame != nullptr)
+            {
+                const uint16_t left = gif_prev_left;
+                const uint16_t top = gif_prev_top;
+                const uint16_t right = left + gif_prev_width;
+                const uint16_t bottom = top + gif_prev_height;
+
+                const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+                const uint16_t height = (gif_framebuffer_height != 0) ? gif_framebuffer_height : TFT_HEIGHT;
+
+                for (uint16_t ry = top; ry < bottom && ry < height; ++ry)
+                {
+                    uint16_t *dstRow = GIF_getRowPtr(ry);
+                    uint16_t *srcRow = GIF_getPrevRowPtr(ry);
+                    if (!dstRow || !srcRow)
+                        continue;
+                    for (uint16_t rx = left; rx < right && rx < stride; ++rx)
+                    {
+                        dstRow[rx] = srcRow[rx];
+                    }
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        /* After applying disposal, clear previous-frame metadata so it isn't applied again */
+        gif_prev_width = 0;
+        gif_prev_height = 0;
+    }
+
+    /* ---------------------------------------------------------
        Read LZW minimum code size
        --------------------------------------------------------- */
 
@@ -3678,6 +3849,72 @@ bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
         ESP_LOGE(TAG, "Failed to initialize LZW decoder");
 
         return false;
+    }
+
+    /*
+     * If this frame requests "restore to previous" (disposal==3)
+     * we must save the current framebuffer so it can be restored
+     * after this frame is removed.
+     */
+    if (gif_DisposalMethod == 3)
+    {
+        const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+        const uint16_t height = (gif_framebuffer_height != 0) ? gif_framebuffer_height : TFT_HEIGHT;
+
+        const size_t pixels = (size_t)stride * height;
+
+        if (gif_framebuffer_row_alloc && gif_framebuffer_rows != nullptr)
+        {
+            /* Allocate previous-frame row-backed buffers */
+            gif_previous_frame_rows = (uint16_t **)malloc((size_t)height * sizeof(uint16_t *));
+            if (gif_previous_frame_rows != nullptr)
+            {
+                bool ok = true;
+                for (uint16_t r = 0; r < height; ++r)
+                {
+                    gif_previous_frame_rows[r] = (uint16_t *)malloc((size_t)stride * sizeof(uint16_t));
+                    if (gif_previous_frame_rows[r] == nullptr)
+                    {
+                        ok = false;
+                        for (uint16_t j = 0; j < r; ++j)
+                            free(gif_previous_frame_rows[j]);
+                        free(gif_previous_frame_rows);
+                        gif_previous_frame_rows = nullptr;
+                        break;
+                    }
+                    memcpy(gif_previous_frame_rows[r], gif_framebuffer_rows[r], (size_t)stride * sizeof(uint16_t));
+                }
+
+                if (!ok)
+                {
+                    ESP_LOGW(TAG, "Failed to allocate previous-frame (row-backed) buffer for disposal=3");
+                }
+                else
+                {
+                    gif_previous_frame_row_alloc = true;
+                }
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Failed to allocate previous-frame row pointer array for disposal=3");
+            }
+        }
+        else
+        {
+            if (gif_previous_frame == nullptr)
+            {
+                gif_previous_frame = (uint16_t *)malloc(pixels * sizeof(uint16_t));
+            }
+
+            if (gif_previous_frame != nullptr)
+            {
+                memcpy(gif_previous_frame, gif_framebuffer, pixels * sizeof(uint16_t));
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Failed to allocate previous-frame buffer for disposal=3");
+            }
+        }
     }
 
     /* ---------------------------------------------------------
@@ -3720,7 +3957,7 @@ bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
            frame with black.
            ----------------------------------------------------- */
 
-        if (!(gif_TransparentColorFlag &&
+          if (!(gif_TransparentColorFlag &&
               color == gif_TransparentColorIndex))
         {
             uint16_t rgb565 = 0;
@@ -3769,10 +4006,14 @@ bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
                Write into existing framebuffer
                ------------------------------------------------- */
 
-            if (px < TFT_WIDTH &&
-                py < TFT_HEIGHT)
+            const uint16_t stride = (gif_framebuffer_stride != 0) ? gif_framebuffer_stride : TFT_WIDTH;
+            const uint16_t height = (gif_framebuffer_height != 0) ? gif_framebuffer_height : TFT_HEIGHT;
+
+            if (px < stride && py < height)
             {
-                gif_framebuffer[(uint32_t)py * TFT_WIDTH + px] = rgb565;
+                uint16_t *rowPtr = GIF_getRowPtr(py);
+                if (rowPtr)
+                    rowPtr[px] = rgb565;
             }
         }
 
@@ -3812,7 +4053,40 @@ bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
      * GIF_ReadImage() only decodes into gif_framebuffer.
      */
 
+    /*
+     * Save metadata for disposal handling by the next frame.
+     */
+    gif_prev_left = frameX;
+    gif_prev_top = frameY;
+    gif_prev_width = srcW;
+    gif_prev_height = srcH;
+    gif_prev_disposal = gif_DisposalMethod;
+
     GIF_displayFrame();
+
+    /*
+     * If the previous-frame buffer exists but the next disposal will
+     * not require restoring, free it to save memory.
+     */
+    if (gif_prev_disposal != 3)
+    {
+        if (gif_previous_frame_row_alloc && gif_previous_frame_rows != nullptr)
+        {
+            for (uint16_t r = 0; r < gif_framebuffer_height; ++r)
+            {
+                if (gif_previous_frame_rows[r] != nullptr)
+                    free(gif_previous_frame_rows[r]);
+            }
+            free(gif_previous_frame_rows);
+            gif_previous_frame_rows = nullptr;
+            gif_previous_frame_row_alloc = false;
+        }
+        else if (gif_previous_frame != nullptr)
+        {
+            free(gif_previous_frame);
+            gif_previous_frame = nullptr;
+        }
+    }
 
     return true;
 }

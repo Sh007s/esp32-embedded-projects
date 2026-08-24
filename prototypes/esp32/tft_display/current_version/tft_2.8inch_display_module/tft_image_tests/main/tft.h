@@ -409,7 +409,21 @@ private:
 
     // GIF frame buffers
     uint16_t *gif_framebuffer = nullptr;
+    // Row-backed framebuffer fallback when a large contiguous block can't be allocated.
+    uint16_t **gif_framebuffer_rows = nullptr;
+    bool gif_framebuffer_row_alloc = false;
     uint16_t *gif_previous_frame = nullptr;
+    uint16_t **gif_previous_frame_rows = nullptr;
+    bool gif_previous_frame_row_alloc = false;
+    // Framebuffer stride (pixels per row) and height for the GIF framebuffer
+    uint16_t gif_framebuffer_stride = 0;
+    uint16_t gif_framebuffer_height = 0;
+    // Previous-frame metadata for disposal handling
+    uint16_t gif_prev_left = 0;
+    uint16_t gif_prev_top = 0;
+    uint16_t gif_prev_width = 0;
+    uint16_t gif_prev_height = 0;
+    uint8_t gif_prev_disposal = 0;
 
     // ========================================================
     // GIF FUNCTIONS
@@ -455,6 +469,9 @@ private:
 
     void GIF_clearFrameBuffer(uint16_t color);
     void GIF_displayFrame();
+    // Helpers for row-backed framebuffers
+    uint16_t *GIF_getRowPtr(uint16_t row);
+    uint16_t *GIF_getPrevRowPtr(uint16_t row);
     // void GIF_displayFrame(uint16_t frameX, uint16_t frameY, uint16_t frameW, uint16_t frameH);
 
     // ========================================================
