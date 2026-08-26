@@ -1,10 +1,11 @@
 # TFT CUSTOM DISPLAY
+
 ## Version 1.0 — Release & Technical Documentation
 
 **Document ID:** TFT-CD-V1.0-DOC  
 **Software Version:** V1.0  
-**Baseline State:** **DEFINED / FREEZE PENDING**  
-**Document Status:** Updated Project Baseline  
+**Baseline State:** **FROZEN / OFFICIAL**  
+**Document Status:** V1.0 Release Baseline  
 **Project Family:** TFT Custom Display  
 **Related Project:** BikeVision  
 
@@ -12,13 +13,16 @@
 
 # 1. Executive Summary
 
-TFT Custom Display V1.0 is the **stable baseline definition** for the TFT Custom Display project.
+TFT Custom Display V1.0 is the **stable and frozen baseline** for the TFT Custom Display project.
 
-The V1.0 baseline contains the currently working TFT/display functionality and the locked GIF benchmark values established during project development.
+V1.0 contains the validated TFT/display functionality established during development. It is the protected reference implementation for:
 
-V1.0 is intended to become the protected reference implementation for V1.x maintenance, V2.x optimization/new features, performance comparison, and BikeVision display integration.
+- V1.x maintenance and minor fixes
+- V2.x optimization and new features
+- Future performance comparisons
+- BikeVision display integration
 
-**Important:** The V1.0 baseline is defined, but final hardware, regression, stability, and build verification remain pending. Therefore this document does not claim that the final release freeze is complete.
+**V1.0 is now frozen.** Major optimization and architectural changes must be developed independently in V2.x.
 
 ---
 
@@ -26,7 +30,7 @@ V1.0 is intended to become the protected reference implementation for V1.x maint
 
 ```text
 TFT Custom Display
-│
+
 ├── V1.0
 │   └── Stable / Frozen Baseline
 │
@@ -44,14 +48,16 @@ TFT Custom Display
 
 ---
 
-# 3. V1.0 Scope
+# 3. V1.0 Validated Scope
 
-The V1 baseline includes the working TFT/display implementation established in the current source baseline.
+The V1 baseline includes the working TFT/display implementation established during development.
 
-Known working areas include:
+Validated areas include:
 
 - TFT initialization
-- TFT orientation / 320×240 operation
+- ILI9341 operation
+- 320×240 display operation
+- TFT orientation
 - Color mapping
 - Basic drawing functions
 - Pixel writing
@@ -60,7 +66,9 @@ Known working areas include:
 - RGB565 image display
 - Image scaling
 - Sprite/icon functionality
-- File-system image integration
+- SPIFFS image integration
+- BMP display
+- JPEG/JPG display
 - GIF file loading
 - GIF parsing
 - GIF LZW decoding
@@ -70,26 +78,32 @@ Known working areas include:
 - GIF framebuffer management
 - Buffered GIF frame display
 
-The exact function-level inventory must be taken from the frozen V1 source tree when the freeze is performed.
+The V1 implementation is now the protected baseline.
 
 ---
 
-# 4. V1.0 Remaining Work Before Freeze
+# 4. V1.0 Final Validation Status
 
-These are **final validation items**, not major optimization:
+## GIF
 
-### GIF validation
-- [ ] Verify 240×320 GIF → 320×240 display orientation
-- [ ] Verify native 320×240 GIF display
-- [ ] Verify frame positioning and bounds
-- [ ] Verify transparency/compositing
-- [ ] Verify disposal behavior
-- [ ] Verify frame-delay behavior
-- [ ] Run repeated GIF playback
-- [ ] Check memory stability
-- [ ] Run final four-GIF regression
+Final GIF validation has been completed.
 
-### Final regression set
+Validated:
+
+- Individual GIF playback
+- Frames changing
+- Playback reaching the end
+- No observed corruption during validation
+- Four-GIF regression
+- Repeated playback
+- Long-duration repeated playback
+- Changing playback delays
+
+The user reported approximately **1 hour 15 minutes** of repeated playback working successfully.
+
+The user also reported a **10-minute repeated test with changing delays** working without observed instability.
+
+### Final GIF regression set
 
 ```text
 birds.gif
@@ -98,33 +112,63 @@ Radar.gif
 tap.gif
 ```
 
-After these checks pass, V1.0 can be formally frozen.
+**GIF V1 validation: PASS**
 
 ---
 
-# 5. Official V1 GIF Performance Baseline
+## BMP
 
-The following values are the **explicitly locked V1 baseline values supplied during project development**.
+The supplied ESP-IDF regression log completed all five BMP tests successfully.
 
-| GIF | Original GIF duration | Arduino BEFORE delay | Arduino AFTER delay | ESP32 V1 current |
-|---|---:|---:|---:|---:|
-| birds.gif | 4.720 s | 4.137 s | 8.853 s | **7.034 s** |
-| clock.gif | 7.920 s | 1.672 s | 9.592 s | **10.394 s** |
-| Radar.gif | 10.100 s | 2.763 s | 12.863 s | **18.924 s** |
-| tap.gif | 1.750 s | 1.804 s | 3.554 s | **3.284 s** |
+| BMP | Logged display time |
+|---|---:|
+| tiger.bmp | 0.423 s |
+| flower.bmp | 0.422 s |
+| Wall_e.bmp | 0.408 s |
+| RedRose.bmp | 0.422 s |
+| tree.bmp | 0.422 s |
 
-### Locked ESP32 V1 reference
+The log concluded with:
 
 ```text
-birds.gif   =  7.034 s
-clock.gif   = 10.394 s
-Radar.gif   = 18.924 s
-tap.gif     =  3.284 s
+ALL BMP TESTS COMPLETE
 ```
 
-These values are the official V1 comparison reference and must not be replaced by another run unless the V1 baseline is deliberately updated.
+**BMP V1 validation: PASS**
 
-Arduino and ESP-IDF measurements remain separate.
+---
+
+## JPEG
+
+JPEG functionality was confirmed working during V1 validation.
+
+**JPEG V1 validation: PASS**
+
+---
+
+# 5. OFFICIAL V1 GIF PERFORMANCE BASELINE
+
+The following values are the **final official V1 GIF benchmarks explicitly locked by the project owner**.
+
+| GIF | Official V1 benchmark |
+|---|---:|
+| `birds.gif` | **7.433 s** 🔒 |
+| `clock.gif` | **10.953 s** 🔒 |
+| `Radar.gif` | **18.903 s** 🔒 |
+| `tap.gif` | **3.673 s** 🔒 |
+
+### Locked ESP-IDF V1 reference
+
+```text
+birds.gif  =  7.433 s
+clock.gif  = 10.953 s
+Radar.gif  = 18.903 s
+tap.gif    =  3.673 s
+```
+
+**These four values are the official V1 comparison baseline.**
+
+Older measurements are historical only and must not replace these values.
 
 ---
 
@@ -137,20 +181,59 @@ Arduino and ESP-IDF measurements remain separate.
 5. Keep Arduino and ESP-IDF measurements separate.
 6. Do not replace an official baseline with an unverified run.
 7. If multiple runs exist, identify the approved baseline rather than averaging or choosing arbitrarily.
-8. Compare all future V2 measurements against the locked V1 values.
+8. Future V2 measurements must be compared against the locked V1 values.
+9. Historical values must not be presented as the current V1 benchmark.
 
 ---
 
-# 7. V2.x Optimization / Future Work
+# 7. V1 Freeze Status
+
+## Baseline
+
+- [x] V1.0 baseline identified
+- [x] V1.x maintenance path established
+- [x] V2.x independent development path established
+- [x] BikeVision relationship established
+- [x] Official GIF benchmarks locked
+
+## GIF V1 Validation
+
+- [x] GIF orientation/display operation validated
+- [x] Frame handling validated
+- [x] Frame bounds/display operation validated
+- [x] Transparency/compositing validated during testing
+- [x] Frame-delay behavior validated
+- [x] Repeated playback validated
+- [x] Long-duration repeated playback validated
+- [x] Four-GIF regression completed
+
+## Image Validation
+
+- [x] BMP regression completed
+- [x] JPEG functionality confirmed
+- [x] GIF functionality confirmed
+
+## Release Documentation
+
+- [x] Final V1 benchmark values recorded
+- [x] V1 freeze state documented
+- [x] V2 development boundary documented
+- [x] BikeVision V1 foundation documented
+
+**V1.0 RELEASE STATUS: FROZEN**
+
+---
+
+# 8. V2.x Optimization / Future Work
 
 Major optimization and new architecture belong in V2.x.
 
-Current V2 candidates:
+Potential V2 areas:
 
 - GIF partial-frame transfer
 - GIF display-transfer optimization
 - Framebuffer optimization
-- JPEG/JPG support
+- JPEG/JPG optimization
 - Advanced BMP improvements
 - Memory optimization
 - FreeRTOS display architecture
@@ -158,29 +241,29 @@ Current V2 candidates:
 - Major rendering improvements
 - Major new display features
 
-The major current performance target is the GIF display-transfer path, with **Radar V1 = 18.924 s** as a locked reference.
-
-V2 optimization must follow:
+The locked V1 GIF values are the comparison reference:
 
 ```text
 V1.0 Baseline
-      ↓
-Measure
-      ↓
+     ↓
+Measure V2
+     ↓
 Identify Bottleneck
-      ↓
-Develop V2.x Change
-      ↓
+     ↓
+Implement V2 Change
+     ↓
 Measure
-      ↓
+     ↓
 Compare Against V1.0
-      ↓
+     ↓
 Validate
 ```
 
+The V1 source must not be modified for V2 optimization.
+
 ---
 
-# 8. BikeVision Integration
+# 9. BikeVision Integration
 
 BikeVision starts from the **frozen TFT Custom Display V1.0**.
 
@@ -192,24 +275,24 @@ TFT Custom Display V1.0
      BikeVision
 ```
 
-Initial BikeVision development:
+Initial BikeVision architecture:
 
 ```text
 BikeVision
-    │
-    ├── TFT V1 display foundation
-    ├── ESP32-CAM
-    ├── Camera capture
-    ├── Image decode
-    ├── 320×240 display
-    └── Initial dashboard
+
+├── TFT V1.0 display foundation
+├── ESP32-CAM
+├── Camera capture
+├── Image decode
+├── 320×240 display
+└── Dashboard
 ```
 
 BikeVision does not need to wait for TFT V2.
 
 ---
 
-# 9. Source-of-Truth Hierarchy
+# 10. Source-of-Truth Hierarchy
 
 1. **Frozen V1.0 source code**
 2. **Actual V1.0 hardware configuration**
@@ -223,39 +306,7 @@ When sources disagree, investigate the discrepancy.
 
 A missing value remains **unknown** rather than being estimated.
 
----
-
-# 10. Release Freeze Checklist
-
-## Baseline
-- [x] V1.0 baseline identified
-- [x] V1.x maintenance path established
-- [x] V2.x independent development path established
-- [x] BikeVision relationship established
-- [x] Official V1 GIF benchmark values locked
-
-## GIF V1 Freeze
-- [ ] 240×320 orientation verified
-- [ ] 320×240 handling verified
-- [ ] Frame bounds verified
-- [ ] Transparency verified
-- [ ] Disposal behavior verified
-- [ ] Frame delay verified
-- [ ] Repeated playback verified
-- [ ] Memory stability verified
-- [ ] Four-GIF regression completed
-
-## Documentation / Build
-- [ ] Exact hardware configuration finalized
-- [ ] Exact software environment finalized
-- [ ] Function-level inventory finalized
-- [ ] Known limitations finalized
-- [ ] Final validation results recorded
-- [ ] Build system verified
-- [ ] Dependencies verified
-- [ ] Configuration verified
-- [ ] Flash procedure verified
-- [ ] Reproducible build verified
+For explicitly locked benchmark values, the locked value is authoritative.
 
 ---
 
@@ -301,47 +352,75 @@ Existing completed functions should not be unnecessarily reimplemented.
 # 12. Project Direction
 
 ```text
-CURRENT
-   │
-   ▼
-Finish V1 validation
-   │
-   ▼
-🔒 Freeze TFT V1.0
-   │
-   ├──────────────► BikeVision
-   │                  ├── ESP32-CAM
-   │                  ├── Camera → TFT
-   │                  ├── 320×240 image
-   │                  └── Dashboard
-   │
-   └──────────────► TFT V2.x
-                      ├── GIF optimization
-                      ├── Partial-frame transfer
-                      ├── JPEG/JPG
-                      ├── BMP improvements
-                      ├── Memory optimization
-                      ├── FreeRTOS
-                      └── Double buffering
+                 TFT V1.0
+                    │
+              🔒 FROZEN
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+          ▼                   ▼
+      BikeVision            TFT V2.x
+          │                   │
+          │                   ├── GIF optimization
+          │                   ├── Partial-frame transfer
+          │                   ├── JPEG/JPG improvements
+          │                   ├── BMP improvements
+          │                   ├── Memory optimization
+          │                   ├── FreeRTOS
+          │                   └── Double buffering
+          │
+          ├── ESP32-CAM
+          ├── Camera
+          ├── Image decode
+          ├── 320×240 display
+          └── Dashboard
 ```
 
 ---
 
-# 13. Revision History
+# 13. Project State Source of Truth
 
-| Revision | Version | Description | Status |
-|---|---|---|---|
-| 1.0 | V1.0 | Initial baseline documentation | Baseline |
-| 1.1 | V1.0 | Updated project state, locked GIF benchmark, V1 freeze checklist, V2 roadmap, and BikeVision relationship | **Current** |
+The engineering project state is maintained separately in:
+
+```text
+PROJECT_STATE.md
+```
+
+`PROJECT_STATE.md` is the master record for:
+
+- Current project status
+- Locked benchmark values
+- Validation results
+- Important implementation decisions
+- Hardware/software environment
+- Completed and remaining work
+- V1/V2 boundaries
+- BikeVision relationship
+
+Whenever a value is explicitly marked **FINAL / OFFICIAL / LOCKED**, it supersedes older measurements for future comparisons.
 
 ---
 
-## Document Control
+# 14. Revision History
+
+| Revision | Version | Description | Status |
+|---|---|---|---|
+| 1.0 | V1.0 | Initial baseline documentation | Historical |
+| 1.1 | V1.0 | Updated baseline, validation checklist, V2 roadmap and BikeVision relationship | Historical |
+| 1.2 | V1.0 | Final V1 validation status and official locked GIF benchmarks | **Current / Frozen** |
+
+---
+
+# Document Control
 
 **Project:** TFT Custom Display  
 **Baseline:** V1.0  
-**Current State:** **Baseline defined — final freeze verification pending**  
-**V1 GIF Baseline:** Locked  
-**BikeVision Foundation:** TFT V1.0 after freeze  
+**Current State:** **V1.0 FROZEN**  
+**V1 GIF Baseline:** **LOCKED**  
+**Official GIF Values:** 7.433 / 10.953 / 18.903 / 3.673 s  
+**JPEG:** Confirmed working  
+**BMP:** Regression PASS  
+**GIF:** Regression and repeated-playback PASS  
+**BikeVision Foundation:** TFT V1.0  
 **Next TFT Development Line:** V2.x  
-**Documentation State:** Updated project baseline
+**Master Project State:** `PROJECT_STATE.md`
