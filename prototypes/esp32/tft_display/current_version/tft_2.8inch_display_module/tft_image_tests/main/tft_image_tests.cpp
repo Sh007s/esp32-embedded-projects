@@ -1,14 +1,11 @@
 #include "tft.h"
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_err.h"
 #include "esp_timer.h"
 #include <string.h>
-
 #include <stdio.h>
 #include <sys/stat.h>
 
@@ -38,10 +35,7 @@ static bool initSPIFFS()
 
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG,
-                 "SPIFFS mount failed: %s",
-                 esp_err_to_name(ret));
-
+        ESP_LOGE(TAG, "SPIFFS mount failed: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -52,20 +46,13 @@ static bool initSPIFFS()
 
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG,
-                 "Failed to get SPIFFS information: %s",
-                 esp_err_to_name(ret));
-
+        ESP_LOGE(TAG, "Failed to get SPIFFS information: %s", esp_err_to_name(ret));
         return false;
     }
 
-    ESP_LOGI(TAG,
-             "SPIFFS Total: %u bytes",
-             (unsigned)total);
+    ESP_LOGI(TAG, "SPIFFS Total: %u bytes", (unsigned)total);
 
-    ESP_LOGI(TAG,
-             "SPIFFS Used : %u bytes",
-             (unsigned)used);
+    ESP_LOGI(TAG, "SPIFFS Used : %u bytes", (unsigned)used);
 
     return true;
 }
@@ -80,21 +67,12 @@ static bool checkFile(const char *path)
 
     if (stat(path, &st) != 0)
     {
-        ESP_LOGE(TAG,
-                 "File NOT found: %s",
-                 path);
-
+        ESP_LOGE(TAG, "File NOT found: %s", path);
         return false;
     }
 
-    ESP_LOGI(TAG,
-             "File found: %s",
-             path);
-
-    ESP_LOGI(TAG,
-             "File size: %ld bytes",
-             (long)st.st_size);
-
+    ESP_LOGI(TAG, "File found: %s", path);
+    ESP_LOGI(TAG, "File size: %ld bytes", (long)st.st_size);
     return true;
 }
 
@@ -114,19 +92,16 @@ static bool displayBMP(TFT &tft, const char *path)
     }
 
     // Clear screen
-    tft.fillScreen(TFT_BLACK);
+      tft.fillScreen(TFT_BLACK);
 
     // Small delay so display clear is finished
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     ESP_LOGI(TAG, "Starting BMP display...");
 
     int64_t start = esp_timer_get_time();
 
-    bool result = tft.drawBmpFile(
-        path,
-        0,
-        0);
+    bool result = tft.drawBmpFile(path, 0, 0);
 
     int64_t end = esp_timer_get_time();
 
@@ -135,17 +110,9 @@ static bool displayBMP(TFT &tft, const char *path)
     if (result)
     {
         ESP_LOGI(TAG, "BMP displayed successfully");
-        ESP_LOGI(TAG,
-                 "BMP DISPLAY TIME = %lld us",
-                 elapsed);
-
-        ESP_LOGI(TAG,
-                 "BMP DISPLAY TIME = %.3f ms",
-                 elapsed / 1000.0);
-
-        ESP_LOGI(TAG,
-                 "BMP DISPLAY TIME = %.3f sec",
-                 elapsed / 1000000.0);
+        ESP_LOGI(TAG, "BMP DISPLAY TIME = %lld us", elapsed);
+        ESP_LOGI(TAG, "BMP DISPLAY TIME = %.3f ms", elapsed / 1000.0);
+        ESP_LOGI(TAG, "BMP DISPLAY TIME = %.3f sec", elapsed / 1000000.0);
     }
     else
     {
@@ -178,10 +145,7 @@ static bool displayJPEG(TFT &tft, const char *path)
     // EXISTING JPEG FUNCTION
     // ====================================================
 
-    bool result = tft.drawJpgFile(
-        path,
-        0,
-        0);
+    bool result = tft.drawJpgFile(path, 0, 0);
 
     int64_t end = esp_timer_get_time();
 
@@ -190,18 +154,9 @@ static bool displayJPEG(TFT &tft, const char *path)
     if (result)
     {
         ESP_LOGI(TAG, "JPEG displayed successfully");
-
-        ESP_LOGI(TAG,
-                 "JPEG DISPLAY TIME = %lld us",
-                 elapsed);
-
-        ESP_LOGI(TAG,
-                 "JPEG DISPLAY TIME = %.3f ms",
-                 elapsed / 1000.0);
-
-        ESP_LOGI(TAG,
-                 "JPEG DISPLAY TIME = %.3f sec",
-                 elapsed / 1000000.0);
+        ESP_LOGI(TAG, "JPEG DISPLAY TIME = %lld us", elapsed);
+        ESP_LOGI(TAG, "JPEG DISPLAY TIME = %.3f ms", elapsed / 1000.0);
+        ESP_LOGI(TAG, "JPEG DISPLAY TIME = %.3f sec", elapsed / 1000000.0);
     }
     else
     {
@@ -240,10 +195,7 @@ static void Test_JPEG_File()
     {
         ESP_LOGI(TAG, "");
         ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG,
-                 "JPEG TEST %d / %d",
-                 i + 1,
-                 jpegCount);
+        ESP_LOGI(TAG, "JPEG TEST %d / %d", i + 1, jpegCount);
         ESP_LOGI(TAG, "========================================");
 
         displayJPEG(tft, jpegFiles[i]);
@@ -273,8 +225,7 @@ void Test_BMP_File()
             "/spiffs/RedRose.bmp",
             "/spiffs/tree.bmp"};
 
-    const int bmpCount =
-        sizeof(bmpFiles) / sizeof(bmpFiles[0]);
+    const int bmpCount = sizeof(bmpFiles) / sizeof(bmpFiles[0]);
 
     // ========================================================
     // DISPLAY EACH BMP
@@ -284,16 +235,13 @@ void Test_BMP_File()
     {
         ESP_LOGI(TAG, "");
         ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG,
-                 "BMP TEST %d / %d",
-                 i + 1,
-                 bmpCount);
+        ESP_LOGI(TAG, "BMP TEST %d / %d", i + 1, bmpCount);
         ESP_LOGI(TAG, "========================================");
 
         displayBMP(tft, bmpFiles[i]);
 
         // Keep image on screen for 3 seconds
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
     // ========================================================
@@ -330,11 +278,7 @@ static bool displayGIF(TFT &tft, const char *path)
 
     int64_t start = esp_timer_get_time();
 
-    bool result = tft.drawGifFile(
-        path,
-        0,
-        0,
-        1);
+    bool result = tft.drawGifFile(path, 0, 0, 1);
 
     int64_t end = esp_timer_get_time();
 
@@ -343,18 +287,9 @@ static bool displayGIF(TFT &tft, const char *path)
     if (result)
     {
         ESP_LOGI(TAG, "GIF displayed successfully");
-
-        ESP_LOGI(TAG,
-                 "GIF DISPLAY TIME = %lld us",
-                 elapsed);
-
-        ESP_LOGI(TAG,
-                 "GIF DISPLAY TIME = %.3f ms",
-                 elapsed / 1000.0);
-
-        ESP_LOGI(TAG,
-                 "GIF DISPLAY TIME = %.3f sec",
-                 elapsed / 1000000.0);
+        ESP_LOGI(TAG, "GIF DISPLAY TIME = %lld us", elapsed);
+        ESP_LOGI(TAG, "GIF DISPLAY TIME = %.3f ms", elapsed / 1000.0);
+        ESP_LOGI(TAG, "GIF DISPLAY TIME = %.3f sec", elapsed / 1000000.0);
     }
     else
     {
@@ -381,11 +316,10 @@ void Test_GIF_File()
 
     const char *gifFiles[] =
         {
-          "/spiffs/birds.gif",
-             "/spiffs/clock.gif",
-        "/spiffs/Radar.gif",
-           "/spiffs/tap.gif"
-        };
+            "/spiffs/birds.gif",
+            "/spiffs/clock.gif",
+            "/spiffs/Radar.gif",
+            "/spiffs/tap.gif"};
 
     const int gifCount = sizeof(gifFiles) / sizeof(gifFiles[0]);
 
@@ -396,18 +330,9 @@ void Test_GIF_File()
     for (int i = 0; i < gifCount; i++)
     {
         ESP_LOGI(TAG, "");
-
-        ESP_LOGI(TAG,
-                 "========================================");
-
-        ESP_LOGI(TAG,
-                 "GIF TEST %d / %d",
-                 i + 1,
-                 gifCount);
-
-        ESP_LOGI(TAG,
-                 "========================================");
-
+        ESP_LOGI(TAG, "========================================");
+        ESP_LOGI(TAG, "GIF TEST %d / %d", i + 1, gifCount);
+        ESP_LOGI(TAG, "========================================");
         displayGIF(tft, gifFiles[i]);
 
         // Keep result on screen
@@ -445,42 +370,35 @@ extern "C" void app_main()
         }
     }
 
-
     tft.begin();
-
 
     // Keep 30 MHz for this test
     tft.setFrequency(50000000);
 
-
     // Landscape
     tft.setRotation(3);
 
-    ESP_LOGI(TAG,
-             "TFT Width  : %d",
-             tft.width());
+    ESP_LOGI(TAG, "TFT Width  : %d", tft.width());
 
-    ESP_LOGI(TAG,
-             "TFT Height : %d",
-             tft.height());
+    ESP_LOGI(TAG, "TFT Height : %d", tft.height());
 
     // ====================================================
     // 4. BMP TEST
     // ====================================================
 
-    //  Test_BMP_File();
+    Test_BMP_File();
 
     // ====================================================
     // 5. JPEG TEST
     // ====================================================
 
-     //  Test_JPEG_File();
+    //  Test_JPEG_File();
 
     // ========================================================
     // GIF TEST
     // ========================================================
 
-    Test_GIF_File();
+    // Test_GIF_File();
 
     // ====================================================
     // KEEP APPLICATION RUNNING
@@ -488,6 +406,8 @@ extern "C" void app_main()
 
     while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Test_GIF_File();
+        Test_BMP_File();
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }

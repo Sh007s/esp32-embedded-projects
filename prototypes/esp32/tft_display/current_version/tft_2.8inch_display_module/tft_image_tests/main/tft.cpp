@@ -133,7 +133,6 @@ void TFT::begin(uint8_t CS, uint8_t DC, uint8_t MOSI, uint8_t MISO,
         "Adding TFT SPI device at %lu Hz",
         (unsigned long)_freq);
 
-
     ESP_ERROR_CHECK(
         spi_bus_add_device(
             _host,
@@ -1596,7 +1595,7 @@ bool TFT::drawBmpFile(const char *path,
             imageY =
                 (int32_t)fileRow;
         }
-                    
+
         // --------------------------------------------------------
         // Vertical crop
         // --------------------------------------------------------
@@ -3598,7 +3597,7 @@ void TFT::GIF_displayFrame()
 
     ESP_LOGI(TAG, "GIF frame displayed: %ux%u -> %ux%u", srcW, srcH, dstW, dstH);
 }
-#else 
+#else
 
 void TFT::GIF_displayFrame()
 {
@@ -3723,15 +3722,10 @@ void TFT::GIF_displayFrame()
 
     free(buffer);
 
-    ESP_LOGI(TAG,
-             "GIF frame displayed: %ux%u -> %ux%u",
-             srcW,
-             srcH,
-             dstW,
-             dstH);
+    ESP_LOGI(TAG,"GIF frame displayed: %ux%u -> %ux%u", srcW, srcH, dstW, dstH);
 }
 
-#endif 
+#endif
 
 bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
 {
@@ -3957,7 +3951,7 @@ bool TFT::GIF_ReadImage(uint16_t x, uint16_t y)
            frame with black.
            ----------------------------------------------------- */
 
-          if (!(gif_TransparentColorFlag &&
+        if (!(gif_TransparentColorFlag &&
               color == gif_TransparentColorIndex))
         {
             uint16_t rgb565 = 0;
