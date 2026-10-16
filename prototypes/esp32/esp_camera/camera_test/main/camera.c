@@ -40,10 +40,13 @@ esp_err_t camera_init(void)
         .pixel_format = PIXFORMAT_JPEG,
 
         // Image Size
-        .frame_size = FRAMESIZE_VGA,
+        .frame_size = FRAMESIZE_QVGA, // 320x240, matches the TFT (was FRAMESIZE_VGA 640x480)
 
-        // JPEG Quality (0-63)
-        .jpeg_quality = 12,
+        // JPEG Quality (0-63, higher number = smaller file)
+        // 12 -> 15: at 12 some OV3660 VGA frames overflowed the 60 KB
+        // frame buffer (cam_hal: FB-OVF) and were dropped. Smaller frames
+        // also need less Wi-Fi airtime when the signal is weak.
+        .jpeg_quality = 15,
 
         // Number of Frame Buffers
         .fb_count = 1,

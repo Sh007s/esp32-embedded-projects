@@ -21,7 +21,7 @@
 #define FRAME_DELAY_MS 100
 
 #define PHOTO_PATH "/sdcard/photo.jpg"
-#define FRAME_PATH_FORMAT "/sdcard/frame_%03d.jpg"
+#define FRAME_PATH_FORMAT "/sdcard/frame%03d.jpg"
 
 static const char *TAG = "MAIN";
 
@@ -493,15 +493,9 @@ test_sd_file_creation();
     http_server_start();
 
     /*
-     * 6. Capture a batch of frames.
-     *
-     * Note: this runs in app_main, so the HTTP server is started
-     * already, but a long batch can still compete for CPU and SD
-     * card access with HTTP requests.
+     * 6. Video recording is started on demand through /record_video.
+     * Do not capture a batch of standalone JPEG frames at boot.
      */
-    ESP_LOGI(TAG, "in[rgfdd] server...");
-    capture_multiple_frames();
-    ESP_LOGI(TAG, "in[rgfdd] server...");
 
     /*
      * 7. Keep app_main alive.
