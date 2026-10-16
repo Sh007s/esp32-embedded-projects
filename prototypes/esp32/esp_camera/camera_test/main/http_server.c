@@ -71,6 +71,7 @@ static esp_err_t index_handler(httpd_req_t *req)
 
         "<body>"
         "<h1>BikeVision Camera</h1>"
+        "<p style=\"color:gray;font-size:small\">Page version: 2 (AVI playback)</p>"
 
         "<p>"
         "<button onclick=\"capturePhoto()\">"
@@ -95,8 +96,11 @@ static esp_err_t index_handler(httpd_req_t *req)
         "<button onclick=\"recordVideo()\">Record 10-Second Video</button> "
         "<a href=\"/record.avi\" download=\"record.avi\">Download Recorded Video</a> "
         "<a href=\"/record_status\" target=\"_blank\">Check SD Video File</a>"
-        "<p><video id=\"recordedVideo\" controls playsinline "
-        "style=\"max-width:100%;height:auto;\"></video></p>"
+        /* Browsers can't play MJPEG-AVI in <video>, so the recorded frames
+         * are played back from the ESP32 as an MJPEG stream into an <img>. */
+        "<p><button onclick=\"playRecordedVideo()\">Play Recorded Video</button></p>"
+        "<p><img id=\"recordedVideo\" alt=\"Recorded video playback\" "
+        "style=\"max-width:100%;height:auto;\"></p>"
 
         "<h2>Live Video</h2>"
         "<p><button onclick=\"startLiveVideo()\">Start Live Video</button> "
@@ -124,6 +128,10 @@ static esp_err_t index_handler(httpd_req_t *req)
         "function recordVideo() {"
         "    if (recordingInProgress) return;"
         "    recordingInProgress = true;"
+        "    stopLiveVideo();"
+        "    const playback = document.getElementById('recordedVideo');"
+        "    playback.onerror = null;"
+        "    playback.removeAttribute('src');"
         "    const status = document.getElementById('status');"
         "    status.innerText = 'Recording AVI video for up to 10 seconds...';"
         "    fetch('/record_video?seconds=10')"
@@ -133,18 +141,31 @@ static esp_err_t index_handler(httpd_req_t *req)
         "        return message;"
         "      })"
         "      .then(function(message) {"
-        "        status.innerText = message + ' Loading recorded video...';"
-        "        const video = document.getElementById('recordedVideo');"
-        "        video.src = '/record.avi?t=' + Date.now();"
-        "        video.load();"
+        "        status.innerText = message + ' Playing recorded video...';"
+        "        playRecordedVideo();"
         "      })"
         "      .catch(function(error) { status.innerText = 'Recording failed: ' + error.message; })"
         "      .finally(function() { recordingInProgress = false; });"
         "}"
 
+        /* Playback shares the port-81 server with live video, so live video
+         * is stopped first; otherwise playback would wait for it to end. */
+        "function playRecordedVideo() {"
+        "    stopLiveVideo();"
+        "    const view = document.getElementById('recordedVideo');"
+        "    view.onerror = function() {"
+        "        document.getElementById('status').innerText = 'No recorded video to play.';"
+        "    };"
+        "    view.src = 'http://' + location.hostname + ':81/playback?t=' + Date.now();"
+        "    document.getElementById('status').innerText = 'Playing recorded video...';"
+        "}"
+
         /* Live stream is served by a separate server on port 81 so it can't
          * block the buttons on this page. */
         "function startLiveVideo() {"
+        "    const playback = document.getElementById('recordedVideo');"
+        "    playback.onerror = null;"
+        "    playback.removeAttribute('src');"
         "    const stream = document.getElementById('liveStream');"
         "    stream.onerror = function() {"
         "        document.getElementById('status').innerText = 'Live video connection lost.';"
@@ -496,11 +517,15 @@ static bool avi_write_header(FILE *f, uint16_t width, uint16_t height)
         !avi_write_fourcc(f, "AVI ") || !avi_write_fourcc(f, "LIST") ||
         !avi_write_u32(f, 192) || !avi_write_fourcc(f, "hdrl") ||
         !avi_write_fourcc(f, "avih") || !avi_write_u32(f, 56)) return false;
+    /* avih: 14 DWORDs = 56 bytes. Order: us/frame, max bytes/s, padding,
+     * flags, total frames, initial frames, streams, suggested buffer,
+     * width, height, reserved[4]. (Previously one extra DWORD was written
+     * here, shifting every later field by 4 bytes.) */
     if (!avi_write_u32(f, 1000000U / AVI_FPS) || !avi_write_u32(f, 0) ||
         !avi_write_u32(f, 0) || !avi_write_u32(f, 0x10) ||
         !avi_write_u32(f, 0) || !avi_write_u32(f, 0) ||
         !avi_write_u32(f, 1) || !avi_write_u32(f, 0) ||
-        !avi_write_u32(f, 0) || !avi_write_u32(f, width) ||
+        !avi_write_u32(f, width) ||
         !avi_write_u32(f, height)) return false;
     for (int i = 0; i < 4; i++) if (!avi_write_u32(f, 0)) return false;
 
@@ -512,7 +537,11 @@ static bool avi_write_header(FILE *f, uint16_t width, uint16_t height)
         !avi_write_u16(f, 0) || !avi_write_u16(f, 0) ||
         !avi_write_u32(f, 0) || !avi_write_u32(f, 1) ||
         !avi_write_u32(f, AVI_FPS) || !avi_write_u32(f, 0) ||
-        !avi_write_u32(f, 0) || !avi_write_u32(f, 0xFFFFFFFFU) ||
+        /* length (patched later), suggested buffer size, quality.
+         * (Suggested buffer size was previously missing, which shifted
+         * quality/sample size/frame rect by 4 bytes.) */
+        !avi_write_u32(f, 0) || !avi_write_u32(f, 0) ||
+        !avi_write_u32(f, 0xFFFFFFFFU) ||
         !avi_write_u32(f, 0) || !avi_write_u16(f, 0) ||
         !avi_write_u16(f, 0) || !avi_write_u16(f, width) ||
         !avi_write_u16(f, height)) return false;
@@ -573,6 +602,7 @@ static esp_err_t record_video_handler(httpd_req_t *req)
     int target_frames = seconds * AVI_FPS;
     int frame_count = 0;
     bool failed = false;
+    int64_t record_start_us = esp_timer_get_time();
     for (int i = 0; i < target_frames; i++)
     {
         camera_fb_t *fb = (i == 0) ? first : esp_camera_fb_get();
@@ -598,16 +628,41 @@ static esp_err_t record_video_handler(httpd_req_t *req)
         avi_index[frame_count].chunk_size = (uint32_t)fb->len;
         frame_count++;
         esp_camera_fb_return(fb);
-        vTaskDelay(pdMS_TO_TICKS(1000 / AVI_FPS));
+
+        /* Wait only for the time left until the next frame slot, instead of a
+         * fixed 100 ms after every frame (capture + SD write already take time). */
+        int64_t next_frame_us = record_start_us +
+                                (int64_t)(i + 1) * (1000000 / AVI_FPS);
+        int64_t wait_us = next_frame_us - esp_timer_get_time();
+        if (wait_us > 1000)
+        {
+            vTaskDelay(pdMS_TO_TICKS(wait_us / 1000));
+        }
     }
 
     if (frame_count == 0) failed = true;
     long movi_end = ftell(file);
     if (movi_end < 0) failed = true;
+
+    /* Real time per frame, so playback runs at the speed it was recorded. */
+    uint32_t us_per_frame = 1000000U / AVI_FPS;
+    if (frame_count > 0)
+    {
+        int64_t elapsed_us = esp_timer_get_time() - record_start_us;
+        if (elapsed_us > 0)
+        {
+            us_per_frame = (uint32_t)(elapsed_us / frame_count);
+        }
+    }
+
     if (!failed)
     {
         uint32_t movi_size = (uint32_t)(movi_end - 220);
+        /* Patch the movi size, then seek BACK to the end of the frames
+         * before writing idx1. (Previously idx1 was written at offset 220,
+         * overwriting the 'movi' header and the first frames.) */
         if (!avi_patch_u32(file, 216, movi_size) ||
+            fseek(file, movi_end, SEEK_SET) != 0 ||
             !avi_write_fourcc(file, "idx1") ||
             !avi_write_u32(file, (uint32_t)frame_count * AVI_INDEX_ENTRY_SIZE)) failed = true;
         for (int i = 0; !failed && i < frame_count; i++)
@@ -618,8 +673,12 @@ static esp_err_t record_video_handler(httpd_req_t *req)
         }
         long end_pos = ftell(file);
         if (end_pos < 0 || !avi_patch_u32(file, 4, (uint32_t)(end_pos - 8)) ||
-            !avi_patch_u32(file, 48, (uint32_t)frame_count) ||
-            !avi_patch_u32(file, 140, (uint32_t)frame_count)) failed = true;
+            !avi_patch_u32(file, 32, us_per_frame) ||          /* avih us/frame */
+            !avi_patch_u32(file, 48, (uint32_t)frame_count) || /* avih total frames */
+            !avi_patch_u32(file, 128, us_per_frame) ||         /* strh scale */
+            !avi_patch_u32(file, 132, 1000000U) ||             /* strh rate */
+            !avi_patch_u32(file, 140, (uint32_t)frame_count))  /* strh length */
+            failed = true;
     }
     if (fclose(file) != 0) failed = true;
     if (failed)
@@ -628,7 +687,8 @@ static esp_err_t record_video_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Recorded AVI: %d frames at %d fps to %s", frame_count, AVI_FPS, AVI_PATH);
+    ESP_LOGI(TAG, "Recorded AVI: %d frames, %.1f fps actual, to %s",
+             frame_count, 1000000.0f / (float)us_per_frame, AVI_PATH);
     httpd_resp_set_type(req, "text/plain");
     char message[96];
     snprintf(message, sizeof(message), "Recorded %d frames in record.avi (MJPEG AVI)", frame_count);
@@ -1052,6 +1112,253 @@ static esp_err_t stream_handler(httpd_req_t *req)
 }
 
 /*
+ * Recorded-video playback.
+ *
+ * Browsers can't play MJPEG-AVI in a <video> element, so this reads
+ * record.avi from the SD card and sends its JPEG frames as the same kind of
+ * MJPEG multipart stream as /stream, paced at the recorded frame rate.
+ * Read-only: the AVI recording code is not changed.
+ */
+#define PLAYBACK_MAX_FRAME_BYTES (256 * 1024) /* reject corrupt sizes */
+
+static bool avi_read_u32(FILE *f, uint32_t *out)
+{
+    uint8_t b[4];
+    if (fread(b, 1, 4, f) != 4)
+    {
+        return false;
+    }
+    *out = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+           ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+    return true;
+}
+
+static bool avi_read_fourcc(FILE *f, char out[4])
+{
+    return fread(out, 1, 4, f) == 4;
+}
+
+/*
+ * Find the 'movi' list. On success *movi_data is the file offset of the
+ * first chunk inside it and *movi_end is the offset just past the list.
+ * Also returns the frame interval from the main AVI header.
+ */
+static bool avi_find_movi(FILE *f, long *movi_data, long *movi_end,
+                          uint32_t *frame_us)
+{
+    char id[4];
+    uint32_t size;
+
+    if (fseek(f, 0, SEEK_SET) != 0 ||
+        !avi_read_fourcc(f, id) || memcmp(id, "RIFF", 4) != 0 ||
+        !avi_read_u32(f, &size) ||
+        !avi_read_fourcc(f, id) || memcmp(id, "AVI ", 4) != 0)
+    {
+        return false;
+    }
+
+    *frame_us = 0;
+
+    for (int guard = 0; guard < 64; guard++)
+    {
+        long chunk_pos = ftell(f);
+        if (chunk_pos < 0 || !avi_read_fourcc(f, id) || !avi_read_u32(f, &size))
+        {
+            return false;
+        }
+
+        if (memcmp(id, "LIST", 4) == 0)
+        {
+            char list_type[4];
+            if (!avi_read_fourcc(f, list_type))
+            {
+                return false;
+            }
+            if (memcmp(list_type, "movi", 4) == 0)
+            {
+                *movi_data = chunk_pos + 12;
+                *movi_end = chunk_pos + 8 + (long)size;
+                return true;
+            }
+            if (memcmp(list_type, "hdrl", 4) == 0)
+            {
+                /* 'avih' chunk follows; its first field is microseconds per frame. */
+                char avih[4];
+                uint32_t avih_size, us;
+                long hdrl_body = ftell(f);
+                if (avi_read_fourcc(f, avih) && memcmp(avih, "avih", 4) == 0 &&
+                    avi_read_u32(f, &avih_size) && avi_read_u32(f, &us))
+                {
+                    *frame_us = us;
+                }
+                if (hdrl_body < 0 || fseek(f, hdrl_body, SEEK_SET) != 0)
+                {
+                    return false;
+                }
+            }
+            /* Skip the rest of this list (size includes the 4-byte type). */
+            if (fseek(f, chunk_pos + 8 + (long)size + (size & 1), SEEK_SET) != 0)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (fseek(f, (long)size + (size & 1), SEEK_CUR) != 0)
+            {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+static esp_err_t playback_handler(httpd_req_t *req)
+{
+    FILE *file = fopen(AVI_PATH, "rb");
+    if (file == NULL)
+    {
+        ESP_LOGW(STREAM_TAG, "playback requested but %s not found", AVI_PATH);
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(STREAM_TAG, "playback: client connected fd=%d", httpd_req_to_sockfd(req));
+
+    long pos = 0, movi_end = 0;
+    uint32_t frame_us = 0;
+    if (!avi_find_movi(file, &pos, &movi_end, &frame_us))
+    {
+        ESP_LOGE(STREAM_TAG, "playback: %s is not a readable AVI", AVI_PATH);
+        fclose(file);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    /* Fall back to the recorder's rate if the header value looks wrong. */
+    if (frame_us < 10000 || frame_us > 2000000)
+    {
+        frame_us = 1000000U / AVI_FPS;
+    }
+
+    httpd_resp_set_type(req, "multipart/x-mixed-replace;boundary=" STREAM_BOUNDARY);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    uint8_t *frame = NULL;
+    size_t frame_cap = 0;
+    uint32_t frames = 0;
+    esp_err_t result = ESP_OK;
+    int64_t t_start = esp_timer_get_time();
+
+    while (pos + 8 <= movi_end)
+    {
+        char id[4];
+        uint32_t size;
+        if (fseek(file, pos, SEEK_SET) != 0 ||
+            !avi_read_fourcc(file, id) || !avi_read_u32(file, &size))
+        {
+            ESP_LOGE(STREAM_TAG, "playback: read error at offset %ld", pos);
+            result = ESP_FAIL;
+            break;
+        }
+
+        long next = pos + 8 + (long)size + (size & 1);
+        if (next > movi_end || next <= pos)
+        {
+            ESP_LOGE(STREAM_TAG, "playback: bad chunk size %lu at offset %ld",
+                     (unsigned long)size, pos);
+            result = ESP_FAIL;
+            break;
+        }
+
+        /* Video frames are '00dc'; skip anything else. */
+        if (memcmp(id, "00dc", 4) == 0 && size > 0)
+        {
+            if (size > PLAYBACK_MAX_FRAME_BYTES)
+            {
+                ESP_LOGE(STREAM_TAG, "playback: frame too large (%lu bytes)",
+                         (unsigned long)size);
+                result = ESP_FAIL;
+                break;
+            }
+            if (size > frame_cap)
+            {
+                uint8_t *bigger = heap_caps_realloc(frame, size,
+                                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (bigger == NULL)
+                {
+                    ESP_LOGE(STREAM_TAG, "playback: no memory for %lu bytes",
+                             (unsigned long)size);
+                    result = ESP_ERR_NO_MEM;
+                    break;
+                }
+                frame = bigger;
+                frame_cap = size;
+            }
+            if (fread(frame, 1, size, file) != size)
+            {
+                ESP_LOGE(STREAM_TAG, "playback: short read in frame %lu",
+                         (unsigned long)frames);
+                result = ESP_FAIL;
+                break;
+            }
+
+            int64_t t_frame = esp_timer_get_time();
+
+            char part_header[128];
+            int header_len = snprintf(part_header, sizeof(part_header),
+                                      "--" STREAM_BOUNDARY "\r\n"
+                                      "Content-Type: image/jpeg\r\n"
+                                      "Content-Length: %lu\r\n\r\n",
+                                      (unsigned long)size);
+            result = stream_send_stage(req, "pb_part_header",
+                                       part_header, header_len, frames);
+            if (result == ESP_OK)
+            {
+                result = stream_send_stage(req, "pb_jpeg_payload",
+                                           (const char *)frame, size, frames);
+            }
+            if (result == ESP_OK)
+            {
+                result = stream_send_stage(req, "pb_trailing_crlf", "\r\n", 2, frames);
+            }
+            if (result != ESP_OK)
+            {
+                break;
+            }
+            frames++;
+
+            /* Pace to the recorded frame rate. */
+            int64_t elapsed_us = esp_timer_get_time() - t_frame;
+            if (elapsed_us < (int64_t)frame_us)
+            {
+                vTaskDelay(pdMS_TO_TICKS((frame_us - elapsed_us) / 1000));
+            }
+        }
+
+        pos = next;
+    }
+
+    free(frame);
+    fclose(file);
+
+    ESP_LOGI(STREAM_TAG, "playback ended: frames=%lu duration=%llds result=%s",
+             (unsigned long)frames,
+             (long long)((esp_timer_get_time() - t_start) / 1000000),
+             esp_err_to_name(result));
+
+    if (result == ESP_OK)
+    {
+        /* Finish the multipart response; the last frame stays on screen. */
+        httpd_resp_send_chunk(req, "--" STREAM_BOUNDARY "--\r\n",
+                              strlen("--" STREAM_BOUNDARY "--\r\n"));
+        httpd_resp_send_chunk(req, NULL, 0);
+    }
+    return result;
+}
+
+/*
  * Start the dedicated live-stream server on STREAM_PORT.
  */
 static void stream_server_start(void)
@@ -1061,7 +1368,7 @@ static void stream_server_start(void)
     config.server_port = STREAM_PORT;
     config.ctrl_port = STREAM_CTRL_PORT;
     config.stack_size = 6144;
-    config.max_uri_handlers = 2;
+    config.max_uri_handlers = 4;     /* /stream, /playback + spare */
     config.max_open_sockets = 2;     /* one viewer + one spare */
     config.lru_purge_enable = true;  /* a new viewer replaces a stale one */
     config.send_wait_timeout = STREAM_SEND_WAIT_TIMEOUT_S;
@@ -1081,12 +1388,25 @@ static void stream_server_start(void)
         return;
     }
 
+    httpd_uri_t playback_uri = {
+        .uri = "/playback",
+        .method = HTTP_GET,
+        .handler = playback_handler,
+        .user_ctx = NULL};
+
     err = httpd_register_uri_handler(stream_server, &stream_uri);
     if (err != ESP_OK)
     {
         ESP_LOGE(STREAM_TAG, "Failed to register /stream: %s",
                  esp_err_to_name(err));
         return;
+    }
+
+    err = httpd_register_uri_handler(stream_server, &playback_uri);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(STREAM_TAG, "Failed to register /playback: %s",
+                 esp_err_to_name(err));
     }
 
     ESP_LOGI(STREAM_TAG,
