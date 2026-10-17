@@ -1,0 +1,28 @@
+menu "ESP-NOW link test"
+
+    config LINK_WIFI_SSID
+        string "Wi-Fi SSID (router or hotspot)"
+        default "myssid"
+        help
+            Both boards must join the same network so they share one Wi-Fi
+            channel, which ESP-NOW needs.
+
+    config LINK_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default "mypassword"
+
+    config LINK_TEST_PACKETS
+        int "Packets per test run"
+        range 10 2000
+        default 1000
+        help
+            Only used by sender_node.
+
+    config LINK_TEST_INTERVAL_S
+        int "Seconds between test runs"
+        range 1 600
+        default 10
+        help
+            Only used by sender_node.
+
+endmenu
