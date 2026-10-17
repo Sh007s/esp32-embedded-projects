@@ -16,7 +16,7 @@
 #define TFT_BLACK 0x0000
 #define TFT_BLUE 0x001F
 #define TFT_RED 0xF800
-#define TFT_GREEN 0x0400
+#define TFT_GREEN 0x0400   // Dark green. For bright green use TFT_LIME (0x07E0)
 #define TFT_CYAN 0x07FF
 #define TFT_MAGENTA 0xF81F
 #define TFT_YELLOW 0xFFE0
@@ -484,8 +484,7 @@ private:
 
     spi_device_handle_t _spi = nullptr;
 
-    uint32_t _freq = 20000000;
-
+    uint32_t _freq = 20000000;   // Overridden to 50 MHz in TFT::TFT() constructor
     uint16_t _width = TFT_WIDTH;
     uint16_t _height = TFT_HEIGHT;
 

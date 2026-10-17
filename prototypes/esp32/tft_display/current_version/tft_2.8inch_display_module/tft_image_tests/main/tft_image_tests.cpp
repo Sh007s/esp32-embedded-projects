@@ -240,7 +240,7 @@ void Test_BMP_File()
 
         displayBMP(tft, bmpFiles[i]);
 
-        // Keep image on screen for 3 seconds
+        // Short 100 ms gap between images (V1.0 validated)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
@@ -372,7 +372,7 @@ extern "C" void app_main()
 
     tft.begin();
 
-    // Keep 30 MHz for this test
+    // SPI clock: 50 MHz (V1.0 validated speed)
     tft.setFrequency(50000000);
 
     // Landscape
@@ -386,13 +386,13 @@ extern "C" void app_main()
     // 4. BMP TEST
     // ====================================================
 
-    Test_BMP_File();
+ //   Test_BMP_File();
 
     // ====================================================
     // 5. JPEG TEST
     // ====================================================
 
-    //  Test_JPEG_File();
+      Test_JPEG_File();
 
     // ========================================================
     // GIF TEST
@@ -407,7 +407,9 @@ extern "C" void app_main()
     while (true)
     {
         // Test_GIF_File();
-        Test_BMP_File();
+        // Test_BMP_File();
+           Test_JPEG_File();
+
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
