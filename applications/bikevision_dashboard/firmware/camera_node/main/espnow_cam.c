@@ -82,6 +82,6 @@ esp_err_t espnow_cam_start(void)
         ESP_LOGE(TAG, "espnow_link_start failed: %s", esp_err_to_name(err));
         return err;
     }
-    xTaskCreate(cam_task, "espnow_cam", 4096, NULL, 4, NULL);
+    xTaskCreate(cam_task, "espnow_cam", 4096, NULL, 5, NULL);
     return ESP_OK;
 }
