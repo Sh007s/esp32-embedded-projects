@@ -384,6 +384,17 @@ static esp_err_t capture_handler(httpd_req_t *req)
         TAG,
         "Capturing new photo...");
 
+    /*
+     * With fb_count = 1 the camera keeps one frame waiting in its buffer.
+     * After an idle period that waiting frame can be old, so take it and
+     * throw it away; the next esp_camera_fb_get() returns a fresh frame.
+     */
+    camera_fb_t *stale = esp_camera_fb_get();
+    if (stale != NULL)
+    {
+        esp_camera_fb_return(stale);
+    }
+
     camera_fb_t *fb =
         esp_camera_fb_get();
 
