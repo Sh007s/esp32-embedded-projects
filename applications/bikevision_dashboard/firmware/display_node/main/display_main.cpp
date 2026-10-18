@@ -1,5 +1,5 @@
 /*
- * display_main - BikeVision display board, step 3.
+ * display_main - BikeVision display board, ste+p 3.
  *
  * Receives camera JPEG frames over ESP-NOW and draws them on the TFT.
  *

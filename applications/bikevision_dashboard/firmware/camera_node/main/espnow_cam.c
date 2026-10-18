@@ -19,7 +19,7 @@
 
 static const char *TAG = "espnow_cam";
 
-#define FRAME_INTERVAL_MS 2000   /* single-frame test: one frame every 2 s */
+#define FRAME_INTERVAL_MS 10     /* live: next frame right after display done */
 #define FRAME_TIMEOUT_MS  2000   /* wait for display "done" (decode + draw) */
 
 static void cam_task(void *arg)
