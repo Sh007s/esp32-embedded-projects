@@ -75,21 +75,80 @@ static bool draw_jpeg(const uint8_t *jpg, size_t len)
 }
 
 /* ---------------------------------------------------------------- */
-/* Status text                                                       */
+/* Start screen: shown at power-on and whenever the camera is lost,  */
+/* until the first camera frame arrives.                             */
 /* ---------------------------------------------------------------- */
 
-static void show_status(const char *line1, const char *line2)
+/* Font is 5x7 in a 6x8 cell, scaled by text size. */
+#define CHAR_W(size) (6 * (size))
+#define START_BG      0x0841            /* very dark blue-grey */
+#define STATUS_Y      168
+#define STATUS_H      24
+#define DOT_X         306
+#define DOT_Y         (STATUS_Y + 8)
+
+static bool s_on_start_screen = false;  /* true until a frame is drawn */
+static bool s_dot_on = false;
+
+static void text_center(const char *s, uint8_t size, int16_t y, uint16_t color)
 {
-    tft.fillScreen(TFT_BLACK);
+    int16_t w = (int16_t)strlen(s) * CHAR_W(size);
+    int16_t x = (tft.width() - w) / 2;
+    tft.setTextSize(size);
+    tft.setTextColor(color);
+    tft.setCursor(x < 0 ? 0 : x, y);
+    tft.writeText(s);
+}
+
+/* Status line near the bottom; redrawn without clearing the whole screen. */
+static void start_status(const char *text, uint16_t color)
+{
+    tft.fillRect(0, STATUS_Y - 4, tft.width(), STATUS_H, START_BG);
+    text_center(text, 2, STATUS_Y, color);
+}
+
+static void show_start_screen(const char *status, uint16_t status_color)
+{
+    const int16_t W = tft.width();
+    tft.fillScreen(START_BG);
+
+    /* Frame */
+    tft.drawRoundRect(6, 6, W - 12, tft.height() - 12, 10, TFT_DARKGREY);
+
+    /* Title: "Bike" white + "Vision" cyan, size 4 (24 px per char) */
+    const uint8_t ts = 4;
+    int16_t title_w = 10 * CHAR_W(ts);
+    int16_t tx = (W - title_w) / 2;
+    tft.setTextSize(ts);
     tft.setTextColor(TFT_WHITE);
-    tft.setTextSize(2);
-    tft.setCursor(10, 100);
-    tft.writeText(line1);
-    if (line2) {
-        tft.setTextSize(1);
-        tft.setCursor(10, 130);
-        tft.writeText(line2);
-    }
+    tft.setCursor(tx, 52);
+    tft.writeText("Bike");
+    tft.setTextColor(TFT_CYAN);
+    tft.setCursor(tx + 4 * CHAR_W(ts), 52);
+    tft.writeText("Vision");
+
+    /* Underline + subtitle */
+    tft.fillRect(tx, 92, title_w, 3, TFT_CYAN);
+    text_center("Smart Bike Dashboard", 2, 108, TFT_LIGHTGREY);
+
+    /* Status line + version */
+    start_status(status, status_color);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_DARKGREY);
+    tft.setCursor(14, tft.height() - 20);
+    tft.writeText("ESP-NOW live camera");
+    tft.setCursor(W - 14 - 6 * 6, tft.height() - 20);
+    tft.writeText("v0.2");
+
+    s_on_start_screen = true;
+    s_dot_on = false;
+}
+
+/* Small blinking dot next to the status, so the screen visibly "lives". */
+static void start_blink(void)
+{
+    s_dot_on = !s_dot_on;
+    tft.fillCircle(DOT_X, DOT_Y, 3, s_dot_on ? TFT_CYAN : START_BG);
 }
 
 /* ---------------------------------------------------------------- */
@@ -103,7 +162,11 @@ static void display_task(void *arg)
     display_msg_t msg;
 
     while (true) {
-        if (xQueueReceive(s_queue, &msg, portMAX_DELAY) != pdTRUE) {
+        /* Wake every 500 ms so the start screen dot can blink */
+        if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(500)) != pdTRUE) {
+            if (s_on_start_screen) {
+                start_blink();
+            }
             continue;
         }
 
@@ -111,6 +174,7 @@ static void display_task(void *arg)
         case MSG_FRAME: {
             int64_t t0 = esp_timer_get_time();
             bool ok = draw_jpeg(msg.data, msg.len);
+            s_on_start_screen = false;      /* camera picture now on screen */
             int64_t t1 = esp_timer_get_time();
             xSemaphoreGive(s_draw_free);    /* next frame may be copied in */
 
@@ -134,11 +198,15 @@ static void display_task(void *arg)
         }
         case MSG_LINK_UP:
             ESP_LOGI(TAG, "Camera link UP (channel %u)", msg.channel);
-            show_status("Camera connected", "Waiting for first frame...");
+            if (!s_on_start_screen) {
+                show_start_screen("Camera found", TFT_GREEN);
+            } else {
+                start_status("Camera found", TFT_GREEN);
+            }
             break;
         case MSG_LINK_DOWN:
             ESP_LOGW(TAG, "Camera link DOWN");
-            show_status("No camera", "Searching...");
+            show_start_screen("Camera lost - searching", TFT_ORANGE);
             break;
         }
     }
@@ -224,7 +292,7 @@ extern "C" void app_main(void)
              (unsigned)MAX_FRAME_SIZE);
     xTaskCreate(display_task, "display", 8192, NULL, 5, NULL);
 
-    show_status("BikeVision", "Waiting for camera...");
+    show_start_screen("Searching for camera", TFT_YELLOW);
 
     ESP_ERROR_CHECK(espnow_link_radio_start(0));
 
