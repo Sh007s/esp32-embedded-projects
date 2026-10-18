@@ -15,6 +15,26 @@
 
 static const char *TAG = "TFT";
 
+// ============================================================================
+// BikeVision PHASE 2 PROFILING (temporary, measurement only).
+// While s_prof.on is true (only during a JPEG-from-RAM draw), the time spent in
+// each part of the draw is added up. One summary line per frame is printed
+// with tag "TFT_PROF". Remove after the speed-up work.
+// ============================================================================
+struct TFTProf
+{
+    bool on;
+    uint32_t blocks;
+    int64_t cb_us;      // whole block callback
+    int64_t conv_us;    // RGB888 -> RGB565 in the callback
+    int64_t cbmalloc_us;// malloc/free of the block buffer in the callback
+    int64_t addr_us;    // setAddrWindow()
+    int64_t wpmalloc_us;// malloc/free inside writePixels()
+    int64_t swap_us;    // byte packing loop inside writePixels()
+    int64_t spi_us;     // writeBytes() SPI transfer inside writePixels()
+};
+static TFTProf s_prof = {};
+
 #define ILI9341_MADCTL_MY 0x80
 #define ILI9341_MADCTL_MX 0x40
 #define ILI9341_MADCTL_MV 0x20
@@ -427,6 +447,9 @@ uint8_t TFT::transferByte(uint8_t value)
 
 void TFT::setAddrWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
+    int64_t prof_t0 = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
+    struct ProfEnd { int64_t t0; ~ProfEnd() { if (t0) s_prof.addr_us += esp_timer_get_time() - t0; } } prof_end{prof_t0};
+
     if (w == 0 || h == 0)
         return;
 
@@ -443,21 +466,20 @@ void TFT::setAddrWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
     if (y2 >= _height)
         y2 = _height - 1;
 
+    // BikeVision C1: send each 4-byte address as ONE transfer
+    // (was 4 single-byte transfers): 5 transfers per window instead of 11.
+    const uint8_t xs[4] = {
+        static_cast<uint8_t>(x >> 8), static_cast<uint8_t>(x & 0xFF),
+        static_cast<uint8_t>(x2 >> 8), static_cast<uint8_t>(x2 & 0xFF)};
+    const uint8_t ys[4] = {
+        static_cast<uint8_t>(y >> 8), static_cast<uint8_t>(y & 0xFF),
+        static_cast<uint8_t>(y2 >> 8), static_cast<uint8_t>(y2 & 0xFF)};
+
     writeCommand(ILI9341_CASET);
-
-    writeByte(x >> 8);
-    writeByte(x & 0xFF);
-
-    writeByte(x2 >> 8);
-    writeByte(x2 & 0xFF);
+    writeBytes(xs, 4);
 
     writeCommand(ILI9341_RASET);
-
-    writeByte(y >> 8);
-    writeByte(y & 0xFF);
-
-    writeByte(y2 >> 8);
-    writeByte(y2 & 0xFF);
+    writeBytes(ys, 4);
 
     writeCommand(ILI9341_RAMWR);
 }
@@ -477,9 +499,12 @@ void TFT::writePixels(const uint16_t *colors, uint32_t len)
 
     constexpr uint32_t PIXELS_PER_TRANSFER = 2048;
 
+    int64_t prof_t = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
     uint8_t *buf =
         static_cast<uint8_t *>(
             malloc(PIXELS_PER_TRANSFER * 2));
+    if (prof_t)
+        s_prof.wpmalloc_us += esp_timer_get_time() - prof_t;
 
     if (!buf)
     {
@@ -496,6 +521,7 @@ void TFT::writePixels(const uint16_t *colors, uint32_t len)
                 PIXELS_PER_TRANSFER);
 
         uint32_t i = 0;
+        int64_t prof_s = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
 
         /*
          * Process two RGB565 pixels at a time.
@@ -546,13 +572,21 @@ void TFT::writePixels(const uint16_t *colors, uint32_t len)
                 static_cast<uint8_t>(color);
         }
 
+        int64_t prof_w = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
+        if (prof_s)
+            s_prof.swap_us += prof_w - prof_s;
         writeBytes(buf, n * 2);
+        if (prof_w)
+            s_prof.spi_us += esp_timer_get_time() - prof_w;
 
         colors += n;
         len -= n;
     }
 
+    prof_t = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
     free(buf);
+    if (prof_t)
+        s_prof.wpmalloc_us += esp_timer_get_time() - prof_t;
 }
 
 void TFT::writeColor(uint16_t color, uint32_t len)
@@ -1731,6 +1765,10 @@ static int tft_jpeg_output_callback(
     TFT *tft =
         ctx->tft;
 
+    // BikeVision: profiling (whole callback)
+    int64_t prof_cb0 = s_prof.on ? esp_timer_get_time() : 0;
+    struct ProfCb { int64_t t0; ~ProfCb() { if (t0) { s_prof.cb_us += esp_timer_get_time() - t0; s_prof.blocks++; } } } prof_cb{prof_cb0};
+
     uint16_t blockW =
         rect->right -
         rect->left +
@@ -1747,9 +1785,12 @@ static int tft_jpeg_output_callback(
     // Much smaller than 320x240 framebuffer.
     // --------------------------------------------------------
 
+    int64_t prof_m = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
     uint16_t *rgb565 =
         (uint16_t *)malloc(
             blockW * blockH * sizeof(uint16_t));
+    if (prof_m)
+        s_prof.cbmalloc_us += esp_timer_get_time() - prof_m;
 
     if (!rgb565)
     {
@@ -1774,6 +1815,7 @@ static int tft_jpeg_output_callback(
 
     const uint8_t *src =
         bitmap;
+    int64_t prof_c = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
 
     // Convert the current JPEG block from RGB888 to RGB565.
     for (uint16_t row = 0;
@@ -1792,6 +1834,9 @@ static int tft_jpeg_output_callback(
                 rgb565_from_rgb888(r, g, b);
         }
     }
+
+    if (prof_c)
+        s_prof.conv_us += esp_timer_get_time() - prof_c;
 
     if (ctx->rotate90)
     {
@@ -1893,7 +1938,10 @@ static int tft_jpeg_output_callback(
             (uint32_t)blockW * blockH);
     }
 
+    prof_m = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
     free(rgb565);
+    if (prof_m)
+        s_prof.cbmalloc_us += esp_timer_get_time() - prof_m;
 
     return 1;
 }
@@ -2251,6 +2299,11 @@ static bool decodeAndDisplayJPEG(
     ctx.imageHeight = imageHeight;
     ctx.rotate90 = false;
 
+    // BikeVision: profiling start
+    s_prof = {};
+    s_prof.on = true;
+    int64_t prof_t0 = esp_timer_get_time();
+
     tft->startWrite();
 
     esp_err_t ret = esp_jpeg_decode_stream(
@@ -2261,6 +2314,24 @@ static bool decodeAndDisplayJPEG(
         &ctx);
 
     tft->endWrite();
+
+    // BikeVision: profiling summary (one line per frame)
+    s_prof.on = false;
+    {
+        int64_t total = esp_timer_get_time() - prof_t0;
+        int64_t decode = total - s_prof.cb_us;   // decoder work outside the callback
+        int64_t pixels = s_prof.wpmalloc_us + s_prof.swap_us + s_prof.spi_us;
+        int64_t other = s_prof.cb_us - s_prof.conv_us - s_prof.cbmalloc_us -
+                        s_prof.addr_us - pixels;
+        ESP_LOGI("TFT_PROF",
+                 "total %lld ms | decode %lld | convert %lld | cb-malloc %lld | "
+                 "addr %lld | wp-malloc %lld | swap %lld | spi %lld | other %lld | blocks %lu",
+                 total / 1000, decode / 1000, s_prof.conv_us / 1000,
+                 s_prof.cbmalloc_us / 1000, s_prof.addr_us / 1000,
+                 s_prof.wpmalloc_us / 1000, s_prof.swap_us / 1000,
+                 s_prof.spi_us / 1000, other / 1000,
+                 (unsigned long)s_prof.blocks);
+    }
 
     if (ret != ESP_OK)
     {

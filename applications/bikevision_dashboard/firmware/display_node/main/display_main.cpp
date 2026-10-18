@@ -1,17 +1,13 @@
 /*
- * display_main - BikeVision display board, ste+p 3.
+ * display_main - BikeVision display board: live camera frames on the TFT.
  *
  * Receives camera JPEG frames over ESP-NOW and draws them on the TFT.
  *
  *  - Nothing is stored: no flash, no SPIFFS, no SD. The frame lives only in
  *    the one reusable 40 KB RAM buffer inside espnow_link and is overwritten
  *    by the next frame.
- *  - No full framebuffer: the JPEG decoder hands out small blocks
- *    (max 16x16 px) which are converted to RGB565 and sent straight to the TFT.
- *  - TFT V1.0 files (tft.cpp, tft.h, font5x7.h, tft_image_tests.cpp) are NOT
- *    modified. Only their public API is used: begin, setFrequency,
- *    setRotation, fillScreen, startWrite/endWrite, setAddrWindow, writePixels,
- *    text functions.
+ *  - Drawing uses the baseline TFT V1.0 function drawJpegBuffer() (made
+ *    public in this application copy of tft.h). No full framebuffer.
  *  - Only one task touches the TFT (display_task). The ESP-NOW callbacks just
  *    pass work to it. on_frame waits until the frame is drawn, so the camera
  *    gets "done" only after the picture is on screen.
@@ -28,7 +24,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#include "jpeg_decoder.h"
 #include "tft.h"
 
 #include "espnow_link.h"
@@ -37,9 +32,8 @@ static const char *TAG = "display";
 
 #define MAX_FRAME_SIZE   (40 * 1024)  /* one reusable RAM buffer (in espnow_link) */
 #define TFT_SPI_HZ       50000000     /* same as V1.0 test */
-#define TFT_ROTATION     3            /* landscape 320x240, same as V1.0 test */
+#define TFT_ROTATION     3            /* landscape 320x240, same as V1.0 test (1 = turned 180 deg) */
 #define DRAW_WAIT_MS     3000         /* on_frame waits this long for the draw */
-#define MAX_BLOCK_PIXELS (16 * 16)    /* largest JPEG MCU block */
 
 static TFT tft(0);
 
@@ -61,86 +55,15 @@ static QueueHandle_t     s_queue;
 static SemaphoreHandle_t s_frame_done;
 
 /* ---------------------------------------------------------------- */
-/* JPEG block -> TFT                                                 */
+/* JPEG -> TFT: baseline TFT V1.0 function                           */
 /* ---------------------------------------------------------------- */
 
-static uint16_t s_block[MAX_BLOCK_PIXELS];   /* 512 B, reused for every block */
-
-typedef struct {
-    uint16_t x, y;      /* top-left on screen */
-    bool     error;
-} draw_ctx_t;
-
-static int jpeg_block_cb(const uint8_t *bitmap,
-                         const esp_jpeg_rect_t *rect,
-                         void *user_ctx)
-{
-    draw_ctx_t *ctx = (draw_ctx_t *)user_ctx;
-    if (!bitmap || !rect || !ctx) {
-        return 0;
-    }
-
-    uint16_t w = rect->right - rect->left + 1;
-    uint16_t h = rect->bottom - rect->top + 1;
-    uint16_t dx = ctx->x + rect->left;
-    uint16_t dy = ctx->y + rect->top;
-
-    if ((uint32_t)w * h > MAX_BLOCK_PIXELS ||
-        dx + w > tft.width() || dy + h > tft.height()) {
-        ctx->error = true;
-        return 0;
-    }
-
-    /* Decoder output is RGB888 (3 bytes per pixel) -> RGB565 */
-    const uint8_t *src = bitmap;
-    for (uint32_t i = 0; i < (uint32_t)w * h; i++) {
-        uint8_t r = *src++;
-        uint8_t g = *src++;
-        uint8_t b = *src++;
-        s_block[i] = tft.color565(r, g, b);
-    }
-
-    tft.setAddrWindow(dx, dy, w, h);
-    tft.writePixels(s_block, (uint32_t)w * h);
-    return 1;
-}
-
+/* drawJpegBuffer() is the V1.0 decoder path (same esp_jpeg stream decode,
+   block by block straight to the TFT). In this application copy of tft.h it
+   was moved from private to public; tft.cpp is unchanged. */
 static bool draw_jpeg(const uint8_t *jpg, size_t len)
 {
-    esp_jpeg_image_cfg_t cfg = {};
-    cfg.indata = (uint8_t *)jpg;
-    cfg.indata_size = len;
-    cfg.out_format = JPEG_IMAGE_FORMAT_RGB888;
-    cfg.out_scale = JPEG_IMAGE_SCALE_0;
-
-    esp_jpeg_image_output_t info = {};
-    esp_err_t err = esp_jpeg_get_image_info(&cfg, &info);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "JPEG info failed: %s", esp_err_to_name(err));
-        return false;
-    }
-    if (info.width > tft.width() || info.height > tft.height()) {
-        ESP_LOGW(TAG, "JPEG %ux%u bigger than TFT %dx%d",
-                 info.width, info.height, tft.width(), tft.height());
-        return false;
-    }
-
-    /* Centre the picture (320x240 fills the screen exactly). */
-    draw_ctx_t ctx = {};
-    ctx.x = (tft.width() - info.width) / 2;
-    ctx.y = (tft.height() - info.height) / 2;
-
-    tft.startWrite();
-    err = esp_jpeg_decode_stream((uint8_t *)jpg, len, JPEG_IMAGE_SCALE_0,
-                                 jpeg_block_cb, &ctx);
-    tft.endWrite();
-
-    if (err != ESP_OK || ctx.error) {
-        ESP_LOGW(TAG, "JPEG decode failed: %s%s", esp_err_to_name(err),
-                 ctx.error ? " (block outside screen)" : "");
-        return false;
-    }
-    return true;
+    return tft.drawJpegBuffer(jpg, len, 0, 0, 0, 0);
 }
 
 /* ---------------------------------------------------------------- */
@@ -259,6 +182,10 @@ extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "BikeVision display (step 3: draw camera frames)");
 
+    /* drawJpegBuffer() logs ~7 info lines per frame; keep only warnings
+       so the serial log does not slow the live picture down. */
+    esp_log_level_set("TFT_JPEG", ESP_LOG_WARN);
+
     tft.begin();                     /* V1.0 default pins */
     tft.setFrequency(TFT_SPI_HZ);
     tft.setRotation(TFT_ROTATION);
@@ -279,4 +206,5 @@ extern "C" void app_main(void)
     cfg.on_frame = on_frame;
     cfg.on_state = on_state;
     ESP_ERROR_CHECK(espnow_link_start(&cfg));
+
 }

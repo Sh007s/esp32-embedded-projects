@@ -213,6 +213,18 @@ public:
             offY);
     }
 
+    // ========================================================
+    // JPEG FROM RAM (BikeVision: moved from private to public so a
+    // camera frame can be drawn straight from the receive buffer)
+    // ========================================================
+
+    bool drawJpegBuffer(const uint8_t *jpg,
+                        size_t jpgSize,
+                        uint16_t x = 0,
+                        uint16_t y = 0,
+                        uint16_t maxWidth = 0,
+                        uint16_t maxHeight = 0);
+
     uint8_t readcommand8(uint8_t command,
                          uint8_t index = 0);
 
@@ -290,17 +302,6 @@ private:
                    uint16_t outH,
                    uint16_t offX,
                    uint16_t offY);
-
-    // ========================================================
-    // JPEG
-    // ========================================================
-
-    bool drawJpegBuffer(const uint8_t *jpg,
-                        size_t jpgSize,
-                        uint16_t x,
-                        uint16_t y,
-                        uint16_t maxWidth,
-                        uint16_t maxHeight);
 
     // ========================================================
     // GIF STATE / DECODER
