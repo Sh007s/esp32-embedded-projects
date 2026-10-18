@@ -3,16 +3,21 @@
  *
  * Receives camera JPEG frames over ESP-NOW and draws them on the TFT.
  *
- *  - Nothing is stored: no flash, no SPIFFS, no SD. The frame lives only in
- *    the one reusable 40 KB RAM buffer inside espnow_link and is overwritten
- *    by the next frame.
+ *  - Nothing is stored: no flash, no SPIFFS, no SD. The same 40 KB of RAM
+ *    as before, now split in two fixed halves (BikeVision 4.6 overlap):
+ *      20 KB receive buffer inside espnow_link (next frame arrives here)
+ *      20 KB draw buffer here (frame being drawn). Both are reused.
  *  - Drawing uses the baseline TFT V1.0 function drawJpegBuffer() (made
  *    public in this application copy of tft.h). No full framebuffer.
  *  - Only one task touches the TFT (display_task). The ESP-NOW callbacks just
- *    pass work to it. on_frame waits until the frame is drawn, so the camera
- *    gets "done" only after the picture is on screen.
+ *    pass work to it.
+ *  - Overlap: on_frame copies the received frame into the draw buffer and
+ *    returns at once, so the camera gets "done" and sends the next frame
+ *    WHILE this one is drawn. If the draw buffer is still busy, on_frame
+ *    waits for it first (so at most one frame waits, never a backlog).
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -30,10 +35,11 @@
 
 static const char *TAG = "display";
 
-#define MAX_FRAME_SIZE   (40 * 1024)  /* one reusable RAM buffer (in espnow_link) */
+#define FRAME_RAM        (40 * 1024)  /* total RAM for frames, as before */
+#define MAX_FRAME_SIZE   (FRAME_RAM / 2) /* 20 KB receive (espnow_link) + 20 KB draw (here) */
 #define TFT_SPI_HZ       50000000     /* same as V1.0 test */
 #define TFT_ROTATION     3            /* landscape 320x240, same as V1.0 test (1 = turned 180 deg) */
-#define DRAW_WAIT_MS     3000         /* on_frame waits this long for the draw */
+#define DRAW_WAIT_MS     3000         /* on_frame waits this long for the draw buffer */
 
 static TFT tft(0);
 
@@ -48,11 +54,13 @@ typedef struct {
     const uint8_t *data;
     size_t         len;
     uint32_t       frame_id;
+    uint32_t       wait_ms;   /* how long on_frame waited for the draw buffer */
     uint8_t        channel;
 } display_msg_t;
 
 static QueueHandle_t     s_queue;
-static SemaphoreHandle_t s_frame_done;
+static SemaphoreHandle_t s_draw_free;   /* given = draw buffer is free */
+static uint8_t          *s_draw_buf;    /* 20 KB, allocated once */
 
 /* ---------------------------------------------------------------- */
 /* JPEG -> TFT: baseline TFT V1.0 function                           */
@@ -104,7 +112,7 @@ static void display_task(void *arg)
             int64_t t0 = esp_timer_get_time();
             bool ok = draw_jpeg(msg.data, msg.len);
             int64_t t1 = esp_timer_get_time();
-            xSemaphoreGive(s_frame_done);   /* camera may send the next one */
+            xSemaphoreGive(s_draw_free);    /* next frame may be copied in */
 
             uint32_t gap_ms = last_us ? (uint32_t)((t0 - last_us) / 1000) : 0;
             last_us = t0;
@@ -114,11 +122,12 @@ static void display_task(void *arg)
                 failed++;
             }
             ESP_LOGI(TAG, "Frame %lu: %u B, draw %s %lu ms, %lu ms since last, "
-                          "free heap %u (drawn %lu, failed %lu)",
+                          "waited %lu ms, free heap %u (drawn %lu, failed %lu)",
                      (unsigned long)msg.frame_id, (unsigned)msg.len,
                      ok ? "OK" : "FAILED",
                      (unsigned long)((t1 - t0) / 1000),
                      (unsigned long)gap_ms,
+                     (unsigned long)msg.wait_ms,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                      (unsigned long)drawn, (unsigned long)failed);
             break;
@@ -148,24 +157,36 @@ static void on_frame(const uint8_t *data, size_t len, uint32_t frame_id)
         return;
     }
 
-    display_msg_t msg = {};
-    msg.type = MSG_FRAME;
-    msg.data = data;
-    msg.len = len;
-    msg.frame_id = frame_id;
-
-    xSemaphoreTake(s_frame_done, 0);   /* clear any old "done" */
-    if (xQueueSend(s_queue, &msg, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "Frame %lu: display busy, skipped",
-                 (unsigned long)frame_id);
+    /* Wait until the previous frame has been drawn (draw buffer free).
+       Usually it already is, or it frees within a few ms. */
+    int64_t w0 = esp_timer_get_time();
+    if (xSemaphoreTake(s_draw_free, pdMS_TO_TICKS(DRAW_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Frame %lu: draw buffer busy for %d ms, skipped",
+                 (unsigned long)frame_id, DRAW_WAIT_MS);
         return;
     }
-    /* Wait until drawn: the buffer must not change while it is decoded,
-       and the camera gets FRAME_ACK only after this returns. */
-    if (xSemaphoreTake(s_frame_done, pdMS_TO_TICKS(DRAW_WAIT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "Frame %lu: draw took more than %d ms",
-                 (unsigned long)frame_id, DRAW_WAIT_MS);
+    uint32_t wait_ms = (uint32_t)((esp_timer_get_time() - w0) / 1000);
+
+    /* Copy out of the receive buffer, so espnow_link can take the next
+       frame while this one is drawn. (len <= MAX_FRAME_SIZE: espnow_link
+       rejects bigger frames.) */
+    memcpy(s_draw_buf, data, len);
+
+    display_msg_t msg = {};
+    msg.type = MSG_FRAME;
+    msg.data = s_draw_buf;
+    msg.len = len;
+    msg.frame_id = frame_id;
+    msg.wait_ms = wait_ms;
+
+    if (xQueueSend(s_queue, &msg, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Frame %lu: display queue full, skipped",
+                 (unsigned long)frame_id);
+        xSemaphoreGive(s_draw_free);
+        return;
     }
+    /* Return now: espnow_link sends FRAME_ACK and the camera sends the
+       next frame while this one is drawn. */
 }
 
 static void on_state(bool up, const uint8_t mac[6], uint8_t channel)
@@ -192,7 +213,15 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "TFT %dx%d", tft.width(), tft.height());
 
     s_queue = xQueueCreate(4, sizeof(display_msg_t));
-    s_frame_done = xSemaphoreCreateBinary();
+    s_draw_free = xSemaphoreCreateBinary();
+    s_draw_buf = (uint8_t *)malloc(MAX_FRAME_SIZE);
+    if (!s_queue || !s_draw_free || !s_draw_buf) {
+        ESP_LOGE(TAG, "Out of memory for the draw buffer");
+        return;
+    }
+    xSemaphoreGive(s_draw_free);     /* draw buffer starts free */
+    ESP_LOGI(TAG, "Draw buffer %u B in RAM (reused, nothing stored in flash)",
+             (unsigned)MAX_FRAME_SIZE);
     xTaskCreate(display_task, "display", 8192, NULL, 5, NULL);
 
     show_status("BikeVision", "Waiting for camera...");
