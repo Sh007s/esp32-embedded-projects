@@ -13,7 +13,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "esp_camera.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
 #include "esp_timer.h"
@@ -25,10 +29,135 @@ static const char *TAG = "espnow_cam";
 #define FRAME_INTERVAL_MS 10     /* live: next frame right after display done */
 #define FRAME_TIMEOUT_MS  2000   /* wait for display "done" (decode + draw) */
 
+/* BikeVision 12fps plan, Phase B2 (measurement only).
+ * 0 = normal live mode.
+ * 1 = link-only test: take ONE picture, copy it, switch the camera OFF
+ *     (esp_camera_deinit), then send that same copy again and again.
+ *     Shows the pure radio speed without the camera working in the background.
+ *     The TFT shows the same still picture; the camera log shows "LINK TEST". */
+#define LINK_TEST_MODE    0
+
+/* BikeVision 12fps plan, B9 (measurement only): look inside the JPEG.
+ * Every frame since B4 has had exactly the same size, which a real JPEG
+ * almost never does. This prints where the JPEG really ends (first FF D9
+ * after the scan data starts), how many filler bytes sit before the last
+ * FF D9, and the last 24 bytes in hex. Printed for the first 3 frames and
+ * then every 200th frame. */
+static void jpeg_debug(const uint8_t *b, size_t len, uint32_t n)
+{
+    if (len < 4) {
+        return;
+    }
+    size_t sos = 0, first_eoi = 0;
+    for (size_t i = 2; i + 1 < len; i++) {
+        if (b[i] == 0xFF && b[i + 1] == 0xDA && sos == 0) {
+            sos = i;
+        }
+        if (sos && i > sos && b[i] == 0xFF && b[i + 1] == 0xD9) {
+            first_eoi = i + 2;   /* length up to and including FF D9 */
+            break;
+        }
+    }
+    /* filler bytes just before the final FF D9 */
+    size_t ff = 0, zero = 0;
+    for (size_t i = len - 3; i > 0 && b[i] == 0xFF; i--) {
+        ff++;
+    }
+    for (size_t i = len - 3; i > 0 && b[i] == 0x00; i--) {
+        zero++;
+    }
+    char hex[24 * 3 + 1];
+    size_t start = len > 24 ? len - 24 : 0, k = 0;
+    for (size_t i = start; i < len; i++) {
+        k += snprintf(hex + k, sizeof(hex) - k, "%02X ", b[i]);
+    }
+    ESP_LOGW(TAG, "JPEG CHECK frame %lu: len %u, SOS at %u, first EOI ends at %u "
+                  "(%u bytes after it), FF fill %u, 00 fill %u | tail: %s",
+             (unsigned long)n, (unsigned)len, (unsigned)sos, (unsigned)first_eoi,
+             (unsigned)(first_eoi ? len - first_eoi : 0),
+             (unsigned)ff, (unsigned)zero, hex);
+}
+
+/* BikeVision 12fps plan, fix C1: send only the real JPEG.
+ * B9 showed every frame was the real JPEG (~4.5 KB, ending at its first
+ * FF D9 after the scan data) plus ~1.9 KB of old bytes left in the buffer
+ * from an earlier frame, ending in that frame's FF D9. The driver reported
+ * the whole thing as the frame length. The display ignores the extra bytes,
+ * so they only cost radio time. Returns the length up to and including the
+ * first FF D9 after the SOS marker, or len if it can't be found. */
+static size_t jpeg_real_len(const uint8_t *b, size_t len)
+{
+    size_t sos = 0;
+    for (size_t i = 2; i + 1 < len; i++) {
+        if (sos == 0) {
+            if (b[i] == 0xFF && b[i + 1] == 0xDA) {
+                sos = i;
+            }
+        } else if (b[i] == 0xFF && b[i + 1] == 0xD9) {
+            return i + 2;
+        }
+    }
+    return len;
+}
+
 static void cam_task(void *arg)
 {
     uint32_t sent = 0, ok = 0, failed = 0;
     uint32_t last_crc = 0, same_run = 0, same_total = 0;
+
+#if LINK_TEST_MODE
+    /* B2: one picture, camera off, then send the copy forever */
+    uint8_t *test_buf = NULL;
+    size_t test_len = 0;
+    while (!test_buf) {
+        if (!espnow_link_is_up()) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+        camera_fb_t *fb0 = esp_camera_fb_get();
+        if (fb0 && fb0->format == PIXFORMAT_JPEG && fb0->len > 0) {
+            test_buf = heap_caps_malloc(fb0->len, MALLOC_CAP_SPIRAM);
+            if (test_buf) {
+                memcpy(test_buf, fb0->buf, fb0->len);
+                test_len = fb0->len;
+            }
+        }
+        if (fb0) {
+            esp_camera_fb_return(fb0);
+        }
+    }
+    esp_camera_deinit();
+    ESP_LOGW(TAG, "LINK TEST: camera OFF, sending the same %u B picture again and again",
+             (unsigned)test_len);
+    while (true) {
+        if (!espnow_link_is_up()) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+        espnow_link_frame_stats_t st = {0};
+        esp_err_t err = espnow_link_send_frame(test_buf, test_len,
+                                               FRAME_TIMEOUT_MS, &st);
+        sent++;
+        if (err == ESP_OK) {
+            ok++;
+            ESP_LOGI(TAG, "LINK TEST Frame %lu: %lu B, %u chunks, %u retries, sent %lu ms "
+                          "| per chunk: lock %lu call %lu wait %lu us, max %lu us (ok %lu/%lu)",
+                     (unsigned long)st.frame_id, (unsigned long)st.bytes, st.chunks,
+                     st.retries, (unsigned long)st.send_ms,
+                     (unsigned long)(st.lock_us / st.chunks),
+                     (unsigned long)(st.call_us / st.chunks),
+                     (unsigned long)(st.wait_us / st.chunks),
+                     (unsigned long)st.max_chunk_us,
+                     (unsigned long)ok, (unsigned long)sent);
+        } else {
+            failed++;
+            ESP_LOGW(TAG, "LINK TEST Frame %lu failed: %s (failed %lu/%lu)",
+                     (unsigned long)st.frame_id, esp_err_to_name(err),
+                     (unsigned long)failed, (unsigned long)sent);
+        }
+        vTaskDelay(pdMS_TO_TICKS(FRAME_INTERVAL_MS));
+    }
+#endif
 
     while (true) {
         if (!espnow_link_is_up()) {
@@ -53,6 +182,10 @@ static void cam_task(void *arg)
             continue;
         }
 
+        if (sent < 3 || sent % 200 == 0) {   /* B9 measurement */
+            jpeg_debug(fb->buf, fb->len, sent + 1);
+        }
+
         /* Frozen-picture check */
         uint32_t crc = esp_rom_crc32_le(0, fb->buf, fb->len);
         bool same = (sent > 0 && crc == last_crc);
@@ -65,7 +198,8 @@ static void cam_task(void *arg)
         last_crc = crc;
 
         espnow_link_frame_stats_t st = {0};
-        esp_err_t err = espnow_link_send_frame(fb->buf, fb->len,
+        size_t send_len = jpeg_real_len(fb->buf, fb->len);   /* fix C1 */
+        esp_err_t err = espnow_link_send_frame(fb->buf, send_len,
                                                FRAME_TIMEOUT_MS, &st);
         esp_camera_fb_return(fb);
         sent++;
@@ -73,13 +207,18 @@ static void cam_task(void *arg)
         if (err == ESP_OK) {
             ok++;
             ESP_LOGI(TAG, "Frame %lu: %lu B, capture %lu ms, %u chunks, %u retries, "
-                          "sent %lu ms, display done %lu ms%s (ok %lu/%lu, same %lu)",
+                          "sent %lu ms, display done %lu ms%s (ok %lu/%lu, same %lu) "
+                          "| per chunk: lock %lu call %lu wait %lu us, max %lu us",
                      (unsigned long)st.frame_id, (unsigned long)st.bytes,
                      (unsigned long)cap_ms, st.chunks, st.retries,
                      (unsigned long)st.send_ms, (unsigned long)st.total_ms,
                      same ? " | SAME PICTURE as previous" : "",
                      (unsigned long)ok, (unsigned long)sent,
-                     (unsigned long)same_total);
+                     (unsigned long)same_total,
+                     (unsigned long)(st.chunks ? st.lock_us / st.chunks : 0),
+                     (unsigned long)(st.chunks ? st.call_us / st.chunks : 0),
+                     (unsigned long)(st.chunks ? st.wait_us / st.chunks : 0),
+                     (unsigned long)st.max_chunk_us);
         } else {
             failed++;
             ESP_LOGW(TAG, "Frame %lu failed: %s (failed %lu/%lu)",

@@ -27,6 +27,15 @@ static const char *TAG = "espnow_link";
 #define SCAN_DWELL_MS       300    /* receiver: time per channel while scanning */
 #define CHUNK_RETRIES       3
 #define SEND_TIMEOUT_MS     100    /* wait for one packet's MAC-layer result */
+
+/* BikeVision 12fps plan, test B7: ESP-NOW radio speed. The default is 1 Mbps
+ * (slowest, longest range). Camera and display are 1-2 m apart, so a faster
+ * rate is fine. Set in espnow_link_radio_start(), so it applies to whichever
+ * board is flashed with this file.
+ * Other choices: WIFI_PHY_RATE_11M_L, WIFI_PHY_RATE_12M, WIFI_PHY_RATE_54M. */
+#ifndef ESPNOW_LINK_PHY_RATE
+#define ESPNOW_LINK_PHY_RATE WIFI_PHY_RATE_11M_L
+#endif
 #define RX_QUEUE_LEN        32
 
 /* ---------------- protocol ---------------- */
@@ -157,6 +166,11 @@ static void set_state(bool up)
     }
 }
 
+/* BikeVision 12fps plan, Phase B1 (measurement only): per-chunk time split.
+   Only counted while send_frame() runs (s_tprof_on). */
+static volatile bool s_tprof_on;
+static int64_t s_tprof_lock_us, s_tprof_call_us, s_tprof_wait_us, s_tprof_max_us;
+
 /* Send one packet and wait for its MAC-layer result. */
 static esp_err_t raw_send(const uint8_t *mac, uint8_t type,
                           const void *payload, size_t len)
@@ -176,9 +190,12 @@ static esp_err_t raw_send(const uint8_t *mac, uint8_t type,
         memcpy(buf + sizeof(*h), payload, len);
     }
 
+    int64_t tp0 = now_us();                       /* B1 measurement */
     xSemaphoreTake(s_send_mutex, portMAX_DELAY);
     xSemaphoreTake(s_send_done, 0);
+    int64_t tp1 = now_us();
     esp_err_t err = esp_now_send(mac, buf, sizeof(*h) + len);
+    int64_t tp2 = now_us();
     if (err == ESP_OK) {
         if (xSemaphoreTake(s_send_done, pdMS_TO_TICKS(SEND_TIMEOUT_MS)) != pdTRUE) {
             err = ESP_ERR_TIMEOUT;
@@ -186,7 +203,16 @@ static esp_err_t raw_send(const uint8_t *mac, uint8_t type,
             err = ESP_FAIL;
         }
     }
+    int64_t tp3 = now_us();
     xSemaphoreGive(s_send_mutex);
+    if (s_tprof_on && type == T_CHUNK) {          /* B1 measurement */
+        s_tprof_lock_us += tp1 - tp0;
+        s_tprof_call_us += tp2 - tp1;
+        s_tprof_wait_us += tp3 - tp2;
+        if (tp3 - tp0 > s_tprof_max_us) {
+            s_tprof_max_us = tp3 - tp0;
+        }
+    }
 
     if (err == ESP_OK && memcmp(mac, BROADCAST, 6) != 0) {
         s_last_ok_us = now_us();
@@ -448,6 +474,17 @@ esp_err_t espnow_link_radio_start(uint8_t channel)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+    /* B7: faster ESP-NOW radio rate (see ESPNOW_LINK_PHY_RATE). Not fatal:
+       if the call is refused, the link keeps the 1 Mbps default and the log
+       says so. */
+    esp_err_t rate_err = esp_wifi_config_espnow_rate(WIFI_IF_STA, ESPNOW_LINK_PHY_RATE);
+    if (rate_err == ESP_OK) {
+        ESP_LOGI(TAG, "ESP-NOW rate set (phy rate %d)", (int)ESPNOW_LINK_PHY_RATE);
+    } else {
+        ESP_LOGW(TAG, "ESP-NOW rate not set (%s), using 1 Mbps default",
+                 esp_err_to_name(rate_err));
+    }
     if (channel >= 1 && channel <= 13) {
         ESP_ERROR_CHECK(esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE));
     }
@@ -549,6 +586,8 @@ esp_err_t espnow_link_send_frame(const uint8_t *data, size_t len,
     xSemaphoreTake(s_frame_done, 0);
 
     uint16_t retries = 0;
+    s_tprof_lock_us = s_tprof_call_us = s_tprof_wait_us = s_tprof_max_us = 0;
+    s_tprof_on = true;                            /* B1 measurement */
     int64_t t0 = now_us();
     for (uint32_t i = 0; i < count; i++) {
         size_t off = i * CHUNK_DATA;
@@ -568,10 +607,12 @@ esp_err_t espnow_link_send_frame(const uint8_t *data, size_t len,
             ESP_LOGW(TAG, "Frame %lu: chunk %lu/%lu not delivered",
                      (unsigned long)c->frame_id, (unsigned long)i + 1,
                      (unsigned long)count);
+            s_tprof_on = false;
             return ESP_FAIL;
         }
     }
     uint32_t send_ms = (uint32_t)((now_us() - t0) / 1000);
+    s_tprof_on = false;
 
     esp_err_t result = ESP_ERR_TIMEOUT;
     if (xSemaphoreTake(s_frame_done, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
@@ -584,6 +625,10 @@ esp_err_t espnow_link_send_frame(const uint8_t *data, size_t len,
         stats->chunks = (uint16_t)count;
         stats->retries = retries;
         stats->send_ms = send_ms;
+        stats->lock_us = (uint32_t)s_tprof_lock_us;   /* B1 measurement */
+        stats->call_us = (uint32_t)s_tprof_call_us;
+        stats->wait_us = (uint32_t)s_tprof_wait_us;
+        stats->max_chunk_us = (uint32_t)s_tprof_max_us;
         stats->total_ms = (uint32_t)((now_us() - t0) / 1000);
     }
     return result;

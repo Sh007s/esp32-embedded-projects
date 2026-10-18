@@ -68,6 +68,11 @@ typedef struct {
     uint16_t retries;      /* chunk re-sends needed */
     uint32_t send_ms;      /* first chunk to last chunk ACKed */
     uint32_t total_ms;     /* first chunk to display "done" */
+    /* BikeVision 12fps plan, Phase B1 (measurement only), summed over all chunks: */
+    uint32_t lock_us;      /* waiting for the send lock (other packets, e.g. PING) */
+    uint32_t call_us;      /* inside esp_now_send() (hand packet to Wi-Fi) */
+    uint32_t wait_us;      /* waiting for the send callback (air time + ACK + Wi-Fi task) */
+    uint32_t max_chunk_us; /* slowest single chunk */
 } espnow_link_frame_stats_t;
 
 /* RECEIVER helper: NVS + event loop + Wi-Fi as a radio only (no network). */
