@@ -503,19 +503,14 @@ void TFT::writePixels(const uint16_t *colors, uint32_t len)
 
     constexpr uint32_t PIXELS_PER_TRANSFER = 2048;
 
+    // BikeVision C4: one static transfer buffer, reused for every call
+    // (was malloc + free on every block = 1200 heap calls per frame).
+    // Only the display task draws, so one buffer is enough.
+    alignas(4) static uint8_t s_wp_buf[PIXELS_PER_TRANSFER * 2];
     int64_t prof_t = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
-    uint8_t *buf =
-        static_cast<uint8_t *>(
-            malloc(PIXELS_PER_TRANSFER * 2));
+    uint8_t *buf = s_wp_buf;
     if (prof_t)
         s_prof.wpmalloc_us += esp_timer_get_time() - prof_t;
-
-    if (!buf)
-    {
-        ESP_LOGE("TFT",
-                 "writePixels: buffer allocation failed");
-        return;
-    }
 
     while (len > 0)
     {
@@ -587,10 +582,7 @@ void TFT::writePixels(const uint16_t *colors, uint32_t len)
         len -= n;
     }
 
-    prof_t = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
-    free(buf);
-    if (prof_t)
-        s_prof.wpmalloc_us += esp_timer_get_time() - prof_t;
+    // BikeVision C4: static buffer, nothing to free
 }
 
 void TFT::writeColor(uint16_t color, uint32_t len)
@@ -1789,10 +1781,16 @@ static int tft_jpeg_output_callback(
     // Much smaller than 320x240 framebuffer.
     // --------------------------------------------------------
 
+    // BikeVision C4: reuse one static block buffer. A JPEG block (MCU) is
+    // at most 16x16 pixels, so 256 pixels always fit; malloc is only a
+    // fallback for an unexpected bigger block.
+    alignas(4) static uint16_t s_block_buf[16 * 16];
     int64_t prof_m = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
-    uint16_t *rgb565 =
-        (uint16_t *)malloc(
-            blockW * blockH * sizeof(uint16_t));
+    const bool block_static =
+        (size_t)blockW * blockH <= sizeof(s_block_buf) / sizeof(s_block_buf[0]);
+    uint16_t *rgb565 = block_static
+        ? s_block_buf
+        : (uint16_t *)malloc(blockW * blockH * sizeof(uint16_t));
     if (prof_m)
         s_prof.cbmalloc_us += esp_timer_get_time() - prof_m;
 
@@ -1860,7 +1858,7 @@ static int tft_jpeg_output_callback(
 
         if (!rotated)
         {
-            free(rgb565);
+            if (!block_static) free(rgb565);
             ESP_LOGE(
                 "TFT_JPEG",
                 "Rotated block allocation failed: %u x %u",
@@ -1891,7 +1889,7 @@ static int tft_jpeg_output_callback(
             destY + rotatedH > tft->height())
         {
             free(rotated);
-            free(rgb565);
+            if (!block_static) free(rgb565);
             ESP_LOGE(
                 "TFT_JPEG",
                 "Rotated JPEG block outside TFT: %u,%u %ux%u",
@@ -1922,7 +1920,7 @@ static int tft_jpeg_output_callback(
         if (destX + blockW > tft->width() ||
             destY + blockH > tft->height())
         {
-            free(rgb565);
+            if (!block_static) free(rgb565);
 
             ESP_LOGE(
                 "TFT_JPEG",
@@ -1943,7 +1941,7 @@ static int tft_jpeg_output_callback(
     }
 
     prof_m = s_prof.on ? esp_timer_get_time() : 0;  // BikeVision: profiling
-    free(rgb565);
+    if (!block_static) free(rgb565);
     if (prof_m)
         s_prof.cbmalloc_us += esp_timer_get_time() - prof_m;
 
