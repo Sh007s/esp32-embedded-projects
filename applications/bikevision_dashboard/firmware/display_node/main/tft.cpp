@@ -16,11 +16,14 @@
 static const char *TAG = "TFT";
 
 // ============================================================================
-// BikeVision PHASE 2 PROFILING (temporary, measurement only).
-// While s_prof.on is true (only during a JPEG-from-RAM draw), the time spent in
-// each part of the draw is added up. One summary line per frame is printed
-// with tag "TFT_PROF". Remove after the speed-up work.
+// BikeVision draw profiling (measurement tool, used for the 2026-10-18
+// speed-up). OFF in normal builds. Set BV_TFT_PROFILE to 1 to get one
+// "TFT_PROF" line per frame with the time split (decode, convert, addr, spi...).
+// When 0, s_prof.on stays false, so every timer below is skipped.
 // ============================================================================
+#ifndef BV_TFT_PROFILE
+#define BV_TFT_PROFILE 0
+#endif
 struct TFTProf
 {
     bool on;
@@ -2301,9 +2304,9 @@ static bool decodeAndDisplayJPEG(
     ctx.imageHeight = imageHeight;
     ctx.rotate90 = false;
 
-    // BikeVision: profiling start
+    // BikeVision: profiling start (only when BV_TFT_PROFILE is 1)
     s_prof = {};
-    s_prof.on = true;
+    s_prof.on = (BV_TFT_PROFILE != 0);
     int64_t prof_t0 = esp_timer_get_time();
 
     tft->startWrite();
@@ -2317,8 +2320,9 @@ static bool decodeAndDisplayJPEG(
 
     tft->endWrite();
 
-    // BikeVision: profiling summary (one line per frame)
+    // BikeVision: profiling summary (one line per frame, only when enabled)
     s_prof.on = false;
+    if (BV_TFT_PROFILE)
     {
         int64_t total = esp_timer_get_time() - prof_t0;
         int64_t decode = total - s_prof.cb_us;   // decoder work outside the callback
