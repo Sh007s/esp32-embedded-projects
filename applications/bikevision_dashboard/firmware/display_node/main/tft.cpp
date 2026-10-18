@@ -415,12 +415,16 @@ void TFT::writeCommand(uint8_t command)
     gpio_set_level(static_cast<gpio_num_t>(_dc), 1);
 }
 
+// BikeVision C2: polling transmit. spi_device_transmit() waits for an
+// interrupt and a task switch on every transfer; for the many tiny
+// command/address transfers that overhead is bigger than the transfer
+// itself. Polling busy-waits instead. Safe: startWrite() holds the bus.
 void TFT::writeByte(uint8_t value)
 {
     spi_transaction_t t = {};
     t.length = 8;
     t.tx_buffer = &value;
-    ESP_ERROR_CHECK(spi_device_transmit(_spi, &t));
+    ESP_ERROR_CHECK(spi_device_polling_transmit(_spi, &t));
 }
 
 void TFT::writeBytes(const uint8_t *data, size_t len)
@@ -431,7 +435,7 @@ void TFT::writeBytes(const uint8_t *data, size_t len)
     spi_transaction_t t = {};
     t.length = len * 8;
     t.tx_buffer = data;
-    ESP_ERROR_CHECK(spi_device_transmit(_spi, &t));
+    ESP_ERROR_CHECK(spi_device_polling_transmit(_spi, &t));
 }
 
 uint8_t TFT::transferByte(uint8_t value)
