@@ -48,10 +48,16 @@ esp_err_t camera_init(void)
         // also need less Wi-Fi airtime when the signal is weak.
         .jpeg_quality = 15,
 
-        // Number of Frame Buffers
-        .fb_count = 1,
+        // Frame buffers (BikeVision live mode, 2026-10-18):
+        // 1 + GRAB_WHEN_EMPTY -> 2 + GRAB_LATEST.
+        // The camera now keeps capturing in the background into the free
+        // buffer, so esp_camera_fb_get() returns the newest picture right
+        // away instead of waiting ~120 ms for a new one. Both buffers are
+        // in PSRAM (15 KB each at QVGA).
+        .fb_count = 2,
+        .fb_location = CAMERA_FB_IN_PSRAM,
 
-        .grab_mode = CAMERA_GRAB_WHEN_EMPTY};
+        .grab_mode = CAMERA_GRAB_LATEST};
 
     esp_err_t err = esp_camera_init(&config);
 

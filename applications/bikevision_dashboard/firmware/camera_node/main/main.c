@@ -14,8 +14,20 @@
 #include "esp_camera.h"
 #include "sdcard.h"
 #include "espnow_cam.h"
+#include "espnow_link.h"
 #include <errno.h>
 #include <string.h>
+
+/*
+ * WIFI_TEST_MODE
+ *   1 = test mode (bench): join the phone hotspot, web page on, ESP-NOW uses
+ *       the hotspot's channel (the display follows it).
+ *   0 = normal mode (bike): no Wi-Fi, no web page, no hotspot search.
+ *       ESP-NOW stays on ESPNOW_CHANNEL, so a missing hotspot cannot move the
+ *       radio and break the camera picture.
+ */
+#define WIFI_TEST_MODE 0
+#define ESPNOW_CHANNEL 1
 
 #define LED_GPIO GPIO_NUM_1 // for build_led pinout is 4
 #define FRAME_COUNT 30
@@ -487,15 +499,23 @@ test_sd_file_creation();
      * 5. Start Wi-Fi and HTTP before batch capture.
      *    This keeps the website available while frames are saved.
      */
+#if WIFI_TEST_MODE
+    ESP_LOGI(TAG, "TEST MODE: Wi-Fi + web page on (ESP-NOW follows the hotspot channel)");
     ESP_LOGI(TAG, "Starting Wi-Fi...");
     wifi_init();
 
     ESP_LOGI(TAG, "Starting HTTP server...");
     http_server_start();
+#else
+    ESP_LOGI(TAG, "NORMAL MODE: Wi-Fi and web page off, ESP-NOW on channel %d",
+             ESPNOW_CHANNEL);
+    ESP_ERROR_CHECK(espnow_link_radio_start(ESPNOW_CHANNEL));
+#endif
 
     /*
      * 5b. Send camera frames to the display board over ESP-NOW.
-     *     Uses the hotspot's Wi-Fi channel; the display finds it by scanning.
+     *     Test mode: hotspot channel. Normal mode: ESPNOW_CHANNEL.
+     *     The display finds the camera by scanning either way.
      */
     ESP_LOGI(TAG, "Starting ESP-NOW link to display...");
     espnow_cam_start();

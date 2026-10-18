@@ -92,6 +92,12 @@ static uint8_t           s_peer[6];
 static volatile int64_t  s_last_ok_us;    /* sender: last ACKed send; receiver: last packet */
 static uint8_t           s_channel;
 
+/* receiver: channel the camera announced in its last HELLO. While the link is
+   up (or a HELLO came in during the last second) the receiver stays on it. */
+static volatile uint8_t  s_lock_ch;
+static volatile int64_t  s_lock_us;
+#define CHANNEL_LOCK_MS  1000
+
 /* sender: result of the frame in flight */
 static volatile uint32_t s_wait_frame_id;
 static volatile uint8_t  s_frame_status;
@@ -308,6 +314,18 @@ static void rx_task(void *arg)
 
         if (s_cfg.role == ESPNOW_LINK_RECEIVER) {
             if (h->type == T_HELLO) {
+                /* Lock onto the camera's channel before answering, so the
+                   scanner cannot hop away between HELLO and link-up. */
+                if (s_cfg.channel == 0 && plen >= sizeof(hello_t)) {
+                    uint8_t ch = ((const hello_t *)p)->channel;
+                    if (ch >= 1 && ch <= 13) {
+                        s_lock_ch = ch;
+                        s_lock_us = now_us();
+                        if (current_channel() != ch) {
+                            esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                        }
+                    }
+                }
                 if (memcmp(s_peer, it.mac, 6) != 0) {
                     if (esp_now_is_peer_exist(s_peer)) {
                         esp_now_del_peer(s_peer);
@@ -389,9 +407,16 @@ static void link_task(void *arg)
                 raw_send(s_peer, T_PING, NULL, 0);
                 last_ping = now;
             }
-        } else { /* RECEIVER: scan channels while down */
-            if (!s_up && s_cfg.channel == 0 &&
-                now - last_hop > (int64_t)SCAN_DWELL_MS * 1000) {
+        } else if (s_cfg.channel == 0) { /* RECEIVER with channel scan */
+            bool locked = s_lock_ch != 0 &&
+                          (s_up || now - s_lock_us < (int64_t)CHANNEL_LOCK_MS * 1000);
+            if (locked) {
+                /* Stay on the camera's channel; undo a hop that raced a HELLO. */
+                if (current_channel() != s_lock_ch) {
+                    esp_wifi_set_channel(s_lock_ch, WIFI_SECOND_CHAN_NONE);
+                    ESP_LOGW(TAG, "Back to camera channel %u", s_lock_ch);
+                }
+            } else if (now - last_hop > (int64_t)SCAN_DWELL_MS * 1000) {
                 esp_wifi_set_channel(scan_ch, WIFI_SECOND_CHAN_NONE);
                 if (scan_ch == 1 && (n++ % 5) == 0) {
                     ESP_LOGI(TAG, "Scanning channels 1-13 for the camera...");
@@ -509,6 +534,12 @@ esp_err_t espnow_link_send_frame(const uint8_t *data, size_t len,
     c->frame_id = ++s_next_frame_id;
     if (c->frame_id == 0) {
         c->frame_id = ++s_next_frame_id;  /* 0 means "none" on the receiver */
+    }
+    if (stats) {
+        /* fill the id now so a failed frame is logged with its real number */
+        memset(stats, 0, sizeof(*stats));
+        stats->frame_id = c->frame_id;
+        stats->bytes = len;
     }
     c->total_len = len;
     c->crc32 = esp_rom_crc32_le(0, data, len);
