@@ -76,6 +76,12 @@ public:
     void writePixelXY(int16_t x, int16_t y, uint16_t color);
 
     void writePixels(const uint16_t *colors, uint32_t len);
+
+    // BikeVision C5 (strip drawing): send pixel bytes in the background with
+    // DMA while the CPU decodes the next strip. Only one transfer is in
+    // flight; waitPixelQueue() must be called before any other SPI write.
+    void queuePixelBytes(const uint8_t *data, size_t len);
+    void waitPixelQueue();
     void writeColor(uint16_t color, uint32_t len);
     void pushColor(uint16_t color);
 
@@ -509,4 +515,6 @@ private:
     int _bl = -1;
 
     bool _busAcquired = false;
+    spi_transaction_t _qtrans = {};   // BikeVision C5: queued pixel transfer
+    bool _qpending = false;
 };

@@ -588,6 +588,28 @@ void TFT::writePixels(const uint16_t *colors, uint32_t len)
     // BikeVision C4: static buffer, nothing to free
 }
 
+// BikeVision C5: background (DMA) pixel transfer for strip drawing.
+void TFT::queuePixelBytes(const uint8_t *data, size_t len)
+{
+    waitPixelQueue();
+    if (!data || !len)
+        return;
+    _qtrans = {};
+    _qtrans.length = len * 8;
+    _qtrans.tx_buffer = data;
+    ESP_ERROR_CHECK(spi_device_queue_trans(_spi, &_qtrans, portMAX_DELAY));
+    _qpending = true;
+}
+
+void TFT::waitPixelQueue()
+{
+    if (!_qpending)
+        return;
+    spi_transaction_t *done = nullptr;
+    ESP_ERROR_CHECK(spi_device_get_trans_result(_spi, &done, portMAX_DELAY));
+    _qpending = false;
+}
+
 void TFT::writeColor(uint16_t color, uint32_t len)
 {
     uint16_t temp[64];
@@ -1744,7 +1766,63 @@ struct TFTJPEGContext
 
     // Rotate portrait JPEG (240x320) clockwise to TFT landscape (320x240).
     bool rotate90;
+
+    // BikeVision C5: strip drawing. Blocks are collected into a full-width
+    // strip of BV_STRIP_LINES lines; a full strip goes to the TFT as ONE
+    // DMA transfer (one address window) while the next strip decodes.
+    bool strip;
+    uint8_t *stripBuf[2];
+    uint8_t stripIdx;
+    int32_t stripY0;      // first image line in the current strip, -1 = none
+    uint16_t stripLines;  // lines filled so far (highest bottom - y0 + 1)
 };
+
+// BikeVision C5: strip drawing settings. 2 strips x 320 px x 16 lines x 2 B
+// = 20 KB of DMA RAM, allocated once and reused (user OK 2026-10-18).
+#ifndef BV_TFT_STRIP
+#define BV_TFT_STRIP 1
+#endif
+#define BV_STRIP_LINES 16
+#define BV_STRIP_MAX_W 320
+#define BV_STRIP_BYTES (BV_STRIP_MAX_W * BV_STRIP_LINES * 2)
+
+static uint8_t *s_strip_mem[2];
+
+static bool strip_buffers_ready()
+{
+    if (s_strip_mem[0] && s_strip_mem[1])
+        return true;
+    for (int i = 0; i < 2; i++)
+    {
+        if (!s_strip_mem[i])
+            s_strip_mem[i] = (uint8_t *)heap_caps_malloc(
+                BV_STRIP_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    }
+    if (!s_strip_mem[0] || !s_strip_mem[1])
+    {
+        ESP_LOGW("TFT_JPEG", "Strip buffers not available, using block drawing");
+        return false;
+    }
+    ESP_LOGW("TFT_JPEG", "Strip drawing ON: 2 x %u B DMA buffers (reused)",
+             (unsigned)BV_STRIP_BYTES);
+    return true;
+}
+
+// Send the current strip (if any) and switch to the other buffer.
+static void strip_flush(TFTJPEGContext *ctx)
+{
+    if (ctx->stripY0 < 0 || ctx->stripLines == 0)
+        return;
+    TFT *tft = ctx->tft;
+    tft->waitPixelQueue();   // previous strip finished; DC/window free
+    tft->setAddrWindow(ctx->x, ctx->y + ctx->stripY0,
+                       ctx->imageWidth, ctx->stripLines);
+    tft->queuePixelBytes(ctx->stripBuf[ctx->stripIdx],
+                         (size_t)ctx->imageWidth * ctx->stripLines * 2);
+    ctx->stripIdx ^= 1;
+    ctx->stripY0 = -1;
+    ctx->stripLines = 0;
+}
 
 static int tft_jpeg_output_callback(
     const uint8_t *bitmap,
@@ -1777,6 +1855,56 @@ static int tft_jpeg_output_callback(
         rect->bottom -
         rect->top +
         1;
+
+    // BikeVision C5: strip drawing path
+    if (ctx->strip)
+    {
+        if (rect->right >= ctx->imageWidth || rect->bottom >= ctx->imageHeight)
+        {
+            ESP_LOGE("TFT_JPEG", "JPEG block outside strip image");
+            return 0;
+        }
+        int32_t y0 = (rect->top / BV_STRIP_LINES) * BV_STRIP_LINES;
+        if (ctx->stripY0 >= 0 && y0 != ctx->stripY0)
+        {
+            strip_flush(ctx);   // should not happen (raster order), but safe
+        }
+        if (ctx->stripY0 < 0)
+        {
+            ctx->stripY0 = y0;
+            ctx->stripLines = 0;
+        }
+
+        // RGB888 -> RGB565, big-endian (high byte first), straight into the
+        // strip: no block buffer, no separate swap step.
+        uint8_t *strip = ctx->stripBuf[ctx->stripIdx];
+        const uint8_t *src = bitmap;
+        const uint16_t w = ctx->imageWidth;
+        for (uint16_t row = 0; row < blockH; row++)
+        {
+            uint8_t *dst = strip +
+                ((size_t)(rect->top - y0 + row) * w + rect->left) * 2;
+            for (uint16_t col = 0; col < blockW; col++)
+            {
+                uint16_t c565 = rgb565_from_rgb888(src[0], src[1], src[2]);
+                src += 3;
+                *dst++ = (uint8_t)(c565 >> 8);
+                *dst++ = (uint8_t)(c565 & 0xFF);
+            }
+        }
+
+        uint16_t filled = rect->bottom - y0 + 1;
+        if (filled > ctx->stripLines)
+            ctx->stripLines = filled;
+
+        // Strip complete when the right-most block of its last line arrives
+        if (rect->right == ctx->imageWidth - 1 &&
+            (filled == BV_STRIP_LINES || rect->bottom == ctx->imageHeight - 1))
+        {
+            strip_flush(ctx);
+        }
+        return 1;
+    }
 
     // --------------------------------------------------------
     // Allocate only the current JPEG block
@@ -2268,7 +2396,8 @@ static bool decodeAndDisplayJPEG(
     uint16_t x,
     uint16_t y,
     uint16_t imageWidth,
-    uint16_t imageHeight);
+    uint16_t imageHeight,
+    bool allowStrip);
 
 static bool decodeAndDisplayJPEG_Rotated90(
     TFT *tft,
@@ -2284,7 +2413,8 @@ static bool decodeAndDisplayJPEG(
     uint16_t x,
     uint16_t y,
     uint16_t imageWidth,
-    uint16_t imageHeight)
+    uint16_t imageHeight,
+    bool allowStrip)
 {
     if (!tft || !jpg || jpgSize < 4)
         return false;
@@ -2304,6 +2434,18 @@ static bool decodeAndDisplayJPEG(
     ctx.imageHeight = imageHeight;
     ctx.rotate90 = false;
 
+    // BikeVision C5: strip drawing when the whole image fits the TFT
+    ctx.strip = BV_TFT_STRIP && allowStrip &&
+                imageWidth <= BV_STRIP_MAX_W &&
+                x + imageWidth <= tft->width() &&
+                y + imageHeight <= tft->height() &&
+                strip_buffers_ready();
+    ctx.stripBuf[0] = s_strip_mem[0];
+    ctx.stripBuf[1] = s_strip_mem[1];
+    ctx.stripIdx = 0;
+    ctx.stripY0 = -1;
+    ctx.stripLines = 0;
+
     // BikeVision: profiling start (only when BV_TFT_PROFILE is 1)
     s_prof = {};
     s_prof.on = (BV_TFT_PROFILE != 0);
@@ -2317,6 +2459,12 @@ static bool decodeAndDisplayJPEG(
         JPEG_IMAGE_SCALE_0,
         tft_jpeg_output_callback,
         &ctx);
+
+    if (ctx.strip)
+    {
+        strip_flush(&ctx);       // last (partial) strip, if any
+        tft->waitPixelQueue();   // last DMA transfer done before CS goes high
+    }
 
     tft->endWrite();
 
@@ -2467,7 +2615,7 @@ bool TFT::drawJpegBuffer(const uint8_t *jpg, size_t jpgSize, uint16_t x, uint16_
     {
         ESP_LOGI("TFT_JPEG", "JPEG fits TFT directly");
 
-        return decodeAndDisplayJPEG(this, jpg, jpgSize, x, y, srcW, srcH);
+        return decodeAndDisplayJPEG(this, jpg, jpgSize, x, y, srcW, srcH, true);
     }
 
     /*
@@ -2519,7 +2667,7 @@ bool TFT::drawJpegBuffer(const uint8_t *jpg, size_t jpgSize, uint16_t x, uint16_
 
     ESP_LOGI("TFT_JPEG", "Scaling JPEG: %ux%u -> %ux%u", srcW, srcH, dstW, dstH);
 
-    return decodeAndDisplayJPEG(this, jpg, jpgSize, x, y, dstW, dstH);
+    return decodeAndDisplayJPEG(this, jpg, jpgSize, x, y, dstW, dstH, false);
 }
 
 // ============================================================================
