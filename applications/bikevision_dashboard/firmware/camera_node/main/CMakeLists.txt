@@ -6,6 +6,7 @@ idf_component_register(
         "wifi.c"
         "http_server.c"
         "espnow_cam.c"
+        "ota_update.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         esp_timer
@@ -16,4 +17,7 @@ idf_component_register(
         esp_http_server
         fatfs
         espnow_link
+        app_update
+        esp_app_format
+        driver
 )

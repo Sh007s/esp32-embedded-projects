@@ -42,3 +42,4 @@ tft_display_module/
 build/
 .vscode/
 *.zip
+ota_secret.h

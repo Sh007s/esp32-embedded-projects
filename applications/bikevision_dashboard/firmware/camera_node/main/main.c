@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <string.h>
 
@@ -15,6 +16,9 @@
 #include "sdcard.h"
 #include "espnow_cam.h"
 #include "espnow_link.h"
+#include "esp_ota_ops.h"
+#include "esp_app_desc.h"
+#include "ota_update.h"
 #include <errno.h>
 #include <string.h>
 
@@ -27,6 +31,16 @@
  *       radio and break the camera picture.
  */
 #define WIFI_TEST_MODE 0
+
+/*
+ * OTA_TEST_BAD_FIRMWARE (H1.4 rollback test only)
+ *   0 = normal.
+ *   1 = this firmware crashes on purpose when it was installed over OTA and
+ *       is still on trial. The bootloader must then go back to the previous
+ *       firmware by itself. (A USB-flashed copy is never on trial, so it
+ *       does not crash.) Set back to 0 after the test.
+ */
+#define OTA_TEST_BAD_FIRMWARE 0
 #define ESPNOW_CHANNEL 1
 
 #define LED_GPIO GPIO_NUM_1 // for build_led pinout is 4
@@ -415,6 +429,85 @@ const char *frame_path = "/sdcard/frame000.jpg";
              "Frame filename test passed");
 }
 
+/*
+ * OTA (H1.2): firmware version + running slot at boot, and rollback support.
+ *
+ * With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, firmware installed over OTA
+ * starts "on trial" (PENDING_VERIFY). It is marked valid only after the
+ * camera and the radio have started. If it crashes or resets before that,
+ * the bootloader goes back to the previous firmware by itself.
+ * Firmware flashed by USB has no trial state (UNDEFINED) and needs nothing.
+ */
+static const char *ota_state_name(esp_ota_img_states_t state)
+{
+    switch (state)
+    {
+    case ESP_OTA_IMG_NEW:            return "new";
+    case ESP_OTA_IMG_PENDING_VERIFY: return "on trial (pending verify)";
+    case ESP_OTA_IMG_VALID:          return "valid";
+    case ESP_OTA_IMG_INVALID:        return "invalid";
+    case ESP_OTA_IMG_ABORTED:        return "aborted";
+    case ESP_OTA_IMG_UNDEFINED:      return "undefined (USB flash)";
+    default:                         return "unknown";
+    }
+}
+
+static bool ota_is_pending_verify(void)
+{
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+
+    if (running != NULL &&
+        esp_ota_get_state_partition(running, &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY)
+    {
+        return true;
+    }
+
+    return false;
+}
+
+static void ota_log_boot_info(void)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+
+    if (running == NULL)
+    {
+        ESP_LOGE(TAG, "OTA: running partition not found");
+        return;
+    }
+
+    esp_ota_get_state_partition(running, &state);
+
+    ESP_LOGW(TAG, "Firmware %s (built %s %s)",
+             app->version, app->date, app->time);
+    ESP_LOGW(TAG, "Running: %s at 0x%lx | state: %s",
+             running->label,
+             (unsigned long)running->address,
+             ota_state_name(state));
+}
+
+static void ota_mark_valid_if_pending(void)
+{
+    if (!ota_is_pending_verify())
+    {
+        return;
+    }
+
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+
+    if (err == ESP_OK)
+    {
+        ESP_LOGW(TAG, "OTA: new firmware works - marked valid (rollback cancelled)");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "OTA: mark valid failed: %s", esp_err_to_name(err));
+    }
+}
+
 void app_main(void)
 {
     /*
@@ -430,6 +523,27 @@ void app_main(void)
     printf("      ESP32-CAM Camera Test\n");
     printf("=================================\n");
 
+    ota_log_boot_info();
+
+    /*
+     * 0. Update mode: update button (IO13 to GND) held at power-on.
+     *    Opens the camera's update network and waits for a new firmware.
+     *    Nothing else is started. Never returns (restarts at the end).
+     */
+    if (ota_update_button_held())
+    {
+        ota_update_mode_run();
+    }
+
+#if OTA_TEST_BAD_FIRMWARE
+    if (ota_is_pending_verify())
+    {
+        ESP_LOGE(TAG, "H1.4 TEST: bad firmware on trial - crashing on purpose");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        abort();
+    }
+#endif
+
     /*
      * 1. Initialize camera.
      */
@@ -441,6 +555,12 @@ void app_main(void)
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Camera initialization failed: 0x%x", ret);
+
+        if (ota_is_pending_verify())
+        {
+            ESP_LOGE(TAG, "OTA: new firmware cannot start the camera - rolling back");
+            esp_ota_mark_app_invalid_rollback_and_reboot();
+        }
 
         while (1)
         {
@@ -519,6 +639,12 @@ test_sd_file_creation();
      */
     ESP_LOGI(TAG, "Starting ESP-NOW link to display...");
     espnow_cam_start();
+
+    /*
+     * 5c. Camera and radio started: if this firmware came over OTA and is
+     *     on trial, keep it (cancel the automatic rollback).
+     */
+    ota_mark_valid_if_pending();
 
     /*
      * 6. Video recording is started on demand through /record_video.
