@@ -21,6 +21,7 @@
 #include "esp_log.h"
 #include "esp_rom_crc.h"
 #include "esp_timer.h"
+#include "esp_rom_sys.h"
 
 #include "espnow_link.h"
 
@@ -28,6 +29,11 @@ static const char *TAG = "espnow_cam";
 
 #define FRAME_INTERVAL_MS 10     /* live: next frame right after display done */
 #define FRAME_TIMEOUT_MS  2000   /* wait for display "done" (decode + draw) */
+
+/* fps cap (2026-10-20, user: 12 fps): the next frame starts no sooner than
+   1/12 s (83 ms) after this one started -> even picture rate, the camera
+   rests when the link is faster. Set FRAME_CAP_FPS 0 to switch it off. */
+#define FRAME_CAP_FPS     12
 
 /* BikeVision 12fps plan, Phase B2 (measurement only).
  * 0 = normal live mode.
@@ -231,6 +237,21 @@ static void cam_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(FRAME_INTERVAL_MS));
+
+#if FRAME_CAP_FPS > 0
+        /* fps cap: wait until 1/FRAME_CAP_FPS s after this frame's capture
+           started (t0). Sleep in ticks, then wait the last < 11 ms exactly. */
+        int64_t next_us = t0 + 1000000LL / FRAME_CAP_FPS;
+        int64_t now_us;
+        while ((now_us = esp_timer_get_time()) < next_us) {
+            int64_t left_us = next_us - now_us;
+            if (left_us > (int64_t)portTICK_PERIOD_MS * 1000 + 1000) {
+                vTaskDelay(1);
+            } else {
+                esp_rom_delay_us((uint32_t)left_us);
+            }
+        }
+#endif
     }
 }
 
