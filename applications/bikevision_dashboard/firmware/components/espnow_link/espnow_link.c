@@ -1,3 +1,6 @@
+#include "bv_link_config.h"
+#if BV_LINK_MODE == BV_LINK_ESPNOW  /* whole file: ESP-NOW link (mode 0) */
+
 #include "espnow_link.h"
 
 #include <stdio.h>
@@ -633,3 +636,4 @@ esp_err_t espnow_link_send_frame(const uint8_t *data, size_t len,
     }
     return result;
 }
+#endif /* BV_LINK_MODE == BV_LINK_ESPNOW */
