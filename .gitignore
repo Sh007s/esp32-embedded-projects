@@ -43,3 +43,4 @@ build/
 .vscode/
 *.zip
 ota_secret.h
+bv_link_secret.h

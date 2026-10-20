@@ -32,6 +32,7 @@
 #include "tft.h"
 
 #include "espnow_link.h"
+#include "bv_link_config.h"   /* BV_LINK_MODE: ESP-NOW (0) or Wi-Fi direct (1) */
 
 static const char *TAG = "display";
 
@@ -136,7 +137,7 @@ static void show_start_screen(const char *status, uint16_t status_color)
     tft.setTextSize(1);
     tft.setTextColor(TFT_DARKGREY);
     tft.setCursor(14, tft.height() - 20);
-    tft.writeText("ESP-NOW live camera");
+    tft.writeText(BV_LINK_MODE_NAME " live camera");   /* shows the active link mode */
     tft.setCursor(W - 14 - 6 * 6, tft.height() - 20);
     tft.writeText("v0.2");
 
