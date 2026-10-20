@@ -42,6 +42,11 @@ static const char *TAG = "display";
 #define TFT_ROTATION     3            /* landscape 320x240, same as V1.0 test (1 = turned 180 deg) */
 #define DRAW_WAIT_MS     3000         /* on_frame waits this long for the draw buffer */
 
+/* Logs (clean-up 2026-10-20): 0 = one summary line every 10 s (normal use),
+   1 = also one line per frame (for measurements). Failed draws always log. */
+#define BV_FRAME_LOG     0
+#define SUMMARY_PERIOD_US (10 * 1000000LL)
+
 static TFT tft(0);
 
 /* ---------------------------------------------------------------- */
@@ -161,6 +166,8 @@ static void display_task(void *arg)
     uint32_t drawn = 0, failed = 0;
     int64_t last_us = 0;
     display_msg_t msg;
+    int64_t sum_t0 = esp_timer_get_time();
+    uint32_t sum_n = 0, sum_draw_ms = 0, sum_max_draw = 0, sum_max_gap = 0, sum_fail = 0;
 
     while (true) {
         /* Wake every 500 ms so the start screen dot can blink */
@@ -181,12 +188,20 @@ static void display_task(void *arg)
 
             uint32_t gap_ms = last_us ? (uint32_t)((t0 - last_us) / 1000) : 0;
             last_us = t0;
+            uint32_t draw_ms = (uint32_t)((t1 - t0) / 1000);
             if (ok) {
                 drawn++;
+                sum_n++;
+                sum_draw_ms += draw_ms;
+                if (draw_ms > sum_max_draw) sum_max_draw = draw_ms;
+                if (gap_ms > sum_max_gap) sum_max_gap = gap_ms;
             } else {
                 failed++;
+                sum_fail++;
+                ESP_LOGW(TAG, "Frame %lu: %u B, draw FAILED (failed %lu)",
+                         (unsigned long)msg.frame_id, (unsigned)msg.len, (unsigned long)failed);
             }
-            ESP_LOGI(TAG, "Frame %lu: %u B, draw %s %lu ms, %lu ms since last, "
+            if (BV_FRAME_LOG) ESP_LOGI(TAG, "Frame %lu: %u B, draw %s %lu ms, %lu ms since last, "
                           "waited %lu ms, free heap %u (drawn %lu, failed %lu)",
                      (unsigned long)msg.frame_id, (unsigned)msg.len,
                      ok ? "OK" : "FAILED",
@@ -195,6 +210,27 @@ static void display_task(void *arg)
                      (unsigned long)msg.wait_ms,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                      (unsigned long)drawn, (unsigned long)failed);
+
+            /* one summary line every 10 s */
+            if (t1 - sum_t0 >= SUMMARY_PERIOD_US) {
+                uint32_t dt_ms = (uint32_t)((t1 - sum_t0) / 1000);
+                uint32_t fps10 = dt_ms ? (uint32_t)((uint64_t)sum_n * 10000 / dt_ms) : 0;
+                ESP_LOGI(TAG, "Summary %lu ms: %lu frames, %lu.%lu fps, draw avg %lu / max %lu ms, "
+                              "max gap %lu ms, failed %lu, free heap %u (total drawn %lu)",
+                         (unsigned long)dt_ms, (unsigned long)sum_n,
+                         (unsigned long)(fps10 / 10), (unsigned long)(fps10 % 10),
+                         (unsigned long)(sum_n ? sum_draw_ms / sum_n : 0),
+                         (unsigned long)sum_max_draw, (unsigned long)sum_max_gap,
+                         (unsigned long)sum_fail,
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                         (unsigned long)drawn);
+                sum_t0 = t1;
+                sum_n = 0;
+                sum_draw_ms = 0;
+                sum_max_draw = 0;
+                sum_max_gap = 0;
+                sum_fail = 0;
+            }
             break;
         }
         case MSG_LINK_UP:

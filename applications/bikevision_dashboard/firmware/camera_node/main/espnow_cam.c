@@ -35,6 +35,11 @@ static const char *TAG = "espnow_cam";
    rests when the link is faster. Set FRAME_CAP_FPS 0 to switch it off. */
 #define FRAME_CAP_FPS     12
 
+/* Logs (clean-up 2026-10-20): 0 = one summary line every 10 s (normal use),
+   1 = also one line per frame + JPEG CHECK (for measurements). */
+#define BV_FRAME_LOG      0
+#define SUMMARY_PERIOD_US (10 * 1000000LL)
+
 /* BikeVision 12fps plan, Phase B2 (measurement only).
  * 0 = normal live mode.
  * 1 = link-only test: take ONE picture, copy it, switch the camera OFF
@@ -110,6 +115,8 @@ static void cam_task(void *arg)
 {
     uint32_t sent = 0, ok = 0, failed = 0;
     uint32_t last_crc = 0, same_run = 0, same_total = 0;
+    int64_t sum_t0 = esp_timer_get_time();
+    uint32_t sum_n = 0, sum_bytes = 0, sum_fail = 0;
 
 #if LINK_TEST_MODE
     /* B2: one picture, camera off, then send the copy forever */
@@ -188,7 +195,7 @@ static void cam_task(void *arg)
             continue;
         }
 
-        if (sent < 3 || sent % 200 == 0) {   /* B9 measurement */
+        if (BV_FRAME_LOG && (sent < 3 || sent % 200 == 0)) {   /* B9 measurement */
             jpeg_debug(fb->buf, fb->len, sent + 1);
         }
 
@@ -212,7 +219,9 @@ static void cam_task(void *arg)
 
         if (err == ESP_OK) {
             ok++;
-            ESP_LOGI(TAG, "Frame %lu: %lu B, capture %lu ms, %u chunks, %u retries, "
+            sum_n++;
+            sum_bytes += st.bytes;
+            if (BV_FRAME_LOG) ESP_LOGI(TAG, "Frame %lu: %lu B, capture %lu ms, %u chunks, %u retries, "
                           "sent %lu ms, display done %lu ms%s (ok %lu/%lu, same %lu) "
                           "| per chunk: lock %lu call %lu wait %lu us, max %lu us",
                      (unsigned long)st.frame_id, (unsigned long)st.bytes,
@@ -227,6 +236,7 @@ static void cam_task(void *arg)
                      (unsigned long)st.max_chunk_us);
         } else {
             failed++;
+            sum_fail++;
             ESP_LOGW(TAG, "Frame %lu failed: %s (failed %lu/%lu)",
                      (unsigned long)st.frame_id, esp_err_to_name(err),
                      (unsigned long)failed, (unsigned long)sent);
@@ -237,6 +247,23 @@ static void cam_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(FRAME_INTERVAL_MS));
+
+        /* one summary line every 10 s */
+        int64_t now_sum = esp_timer_get_time();
+        if (now_sum - sum_t0 >= SUMMARY_PERIOD_US) {
+            uint32_t dt_ms = (uint32_t)((now_sum - sum_t0) / 1000);
+            uint32_t fps10 = dt_ms ? (uint32_t)((uint64_t)sum_n * 10000 / dt_ms) : 0;
+            ESP_LOGI(TAG, "Summary %lu ms: %lu frames, %lu.%lu fps, avg %lu B, failed %lu "
+                          "(total ok %lu / sent %lu)",
+                     (unsigned long)dt_ms, (unsigned long)sum_n,
+                     (unsigned long)(fps10 / 10), (unsigned long)(fps10 % 10),
+                     (unsigned long)(sum_n ? sum_bytes / sum_n : 0),
+                     (unsigned long)sum_fail, (unsigned long)ok, (unsigned long)sent);
+            sum_t0 = now_sum;
+            sum_n = 0;
+            sum_bytes = 0;
+            sum_fail = 0;
+        }
 
 #if FRAME_CAP_FPS > 0
         /* fps cap: wait until 1/FRAME_CAP_FPS s after this frame's capture
