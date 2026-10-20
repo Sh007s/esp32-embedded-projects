@@ -72,6 +72,7 @@ static const char *TAG = "wifi_link";
 #define WL_MAX_CHUNKS   32          /* 32 x 1400 = 44 KB max frame */
 #define WL_LINK_TIMEOUT_US   (3000 * 1000)
 #define WL_KEEPALIVE_MS      500
+#define WL_REJOIN_US         (5000 * 1000)   /* display: no reply this long -> rejoin network */
 
 enum {
     WL_HELLO = 1,   /* display -> camera, every 500 ms */
@@ -118,6 +119,7 @@ static uint8_t       s_txbuf[sizeof(wl_hdr_t) + WL_CHUNK_MAX];
 
 /* RECEIVER */
 static volatile bool s_have_ip;
+static volatile int64_t s_ip_time_us;      /* when the display got its IP */
 static uint8_t  *s_buf;
 static uint32_t  s_rx_fid, s_rx_total, s_rx_crc, s_rx_mask, s_last_done_fid;
 static uint16_t  s_rx_count;
@@ -196,6 +198,21 @@ static void keepalive_task(void *arg)
 
         if (s_up && esp_timer_get_time() - s_last_heard_us > WL_LINK_TIMEOUT_US) {
             set_link(false);
+        }
+
+        /* Display only: joined the network but nothing heard from the camera
+           for 5 s (e.g. camera restarted and no longer knows us, while its
+           beacons keep coming) -> leave and join again. The DISCONNECTED
+           event below reconnects. This is what a display reset did by hand. */
+        if (s_cfg.role == ESPNOW_LINK_RECEIVER && s_have_ip) {
+            int64_t now = esp_timer_get_time();
+            int64_t last = s_last_heard_us > s_ip_time_us ? s_last_heard_us : s_ip_time_us;
+            if (now - last > WL_REJOIN_US) {
+                ESP_LOGW(TAG, "No reply from the camera for 5 s - rejoining the camera network");
+                s_have_ip = false;
+                set_link(false);
+                esp_wifi_disconnect();
+            }
         }
     }
 }
@@ -501,6 +518,7 @@ static void receiver_event(void *arg, esp_event_base_t base, int32_t id, void *d
         to.sin_addr.s_addr = e->ip_info.gw.addr;   /* camera = gateway 192.168.4.1 */
         s_peer_addr = to;
         s_peer_known = true;
+        s_ip_time_us = esp_timer_get_time();
         s_have_ip = true;
         ESP_LOGI(TAG, "Got IP " IPSTR ", camera at " IPSTR,
                  IP2STR(&e->ip_info.ip), IP2STR(&e->ip_info.gw));

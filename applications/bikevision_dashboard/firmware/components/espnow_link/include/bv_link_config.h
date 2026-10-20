@@ -17,7 +17,7 @@
 #define BV_LINK_WIFI     1
 
 #ifndef BV_LINK_MODE
-#define BV_LINK_MODE     BV_LINK_ESPNOW
+#define BV_LINK_MODE     BV_LINK_WIFI
 #endif
 
 #if BV_LINK_MODE == BV_LINK_WIFI
