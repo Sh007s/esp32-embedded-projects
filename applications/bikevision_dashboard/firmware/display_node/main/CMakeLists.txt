@@ -5,6 +5,8 @@
 idf_component_register(
     SRCS
         "display_main.cpp"
+        "bv_sens.c"
+        "bv_gps.c"
         "bv_input.c"
         "tft.cpp"
     INCLUDE_DIRS
@@ -14,6 +16,7 @@ idf_component_register(
         esp_system
         freertos
         driver
+        nvs_flash
         spiffs
         esp_jpeg
     PRIV_REQUIRES

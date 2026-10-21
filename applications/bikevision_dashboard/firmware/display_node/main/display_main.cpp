@@ -3,11 +3,16 @@
  *
  * Pages (UI design "BikeVision Display UI"):
  *   1 Boot animation (~3 s): bike rides in, headlight blinks, title, loading bar
- *   2 Menu: 6 tiles (Camera, Ride, Location, Time, Cam info, Settings)
+ *   2 Menu: 6 tiles (Camera, Ride, Location, Time, Cam info, Sensors)
  *   3 Camera: live camera picture (full screen)
  *   4 Cam info: link + frame numbers, refreshed twice a second
- *   5 Time: time since power-on (real clock needs the GPS)
- *   6 Ride / Location / Settings: placeholders until GPS / sensors are fitted
+ *   5 Time: GPS time + date (local), time since power-on until the first fix
+ *   6 Ride: speed, trip, max, ride time, average (GPS); hold = reset trip
+ *   7 Location: position, altitude, satellites, back-to-parking distance +
+ *     arrow; hold = save the parking spot (kept after power-off)
+ *   8 Sensors: temperature, (humidity), pressure, altitude, climb, compass
+ *     (HW-611 BMP280/BME280 + GY-271 on I2C 32/33); hold = calibrate compass
+ *     (Settings comes back later, when there is something to set)
  *
  * Control: rotary encoder (bv_input.c). Menu: turn = select tile, press = open.
  * Info pages: press = back to the menu. Camera page: hold the knob 2 s = back
@@ -40,6 +45,10 @@
 
 #include "espnow_link.h"
 #include "bv_input.h"         /* rotary encoder (+ later 2 buttons) */
+#include "bv_gps.h"           /* NEO-6M GPS on UART2 (time, speed, position) */
+#include "bv_sens.h"          /* I2C: BMP280/BME280 + compass (GPIO32/33) */
+#include "nvs.h"              /* parking spot */
+#include <math.h>
 #include "bv_link_config.h"   /* BV_LINK_MODE: ESP-NOW (0) or Wi-Fi direct (1) */
 
 static const char *TAG = "display";
@@ -126,22 +135,29 @@ static void text_center(const char *s, uint8_t size, int16_t y, uint16_t color)
     text_at((tft.width() - w) / 2, y, size, color, s);
 }
 
+/* centred inside a box starting at x, w wide */
+static void text_center_box(const char *s, int16_t x, int16_t w, uint8_t size, int16_t y, uint16_t color)
+{
+    int16_t tw = (int16_t)strlen(s) * CHAR_W(size);
+    text_at(x + (w - tw) / 2, y, size, color, s);
+}
+
 /* ---------------------------------------------------------------- */
 /* State                                                             */
 /* ---------------------------------------------------------------- */
 
 typedef enum {
     PAGE_BOOT = 0, PAGE_MENU, PAGE_CAMERA, PAGE_RIDE, PAGE_LOCATION,
-    PAGE_TIME, PAGE_CAMINFO, PAGE_SETTINGS,
+    PAGE_TIME, PAGE_CAMINFO, PAGE_SENSORS,
 } page_t;
 
 static const char *PAGE_NAME[] = {
-    "BOOT", "MENU", "CAMERA", "RIDE", "LOCATION", "TIME", "CAM INFO", "SETTINGS",
+    "BOOT", "MENU", "CAMERA", "RIDE", "LOCATION", "TIME", "CAM INFO", "SENSORS",
 };
 
 /* menu tiles, in screen order (2 columns x 3 rows) */
 static const page_t TILE_PAGE[6] = {
-    PAGE_CAMERA, PAGE_RIDE, PAGE_LOCATION, PAGE_TIME, PAGE_CAMINFO, PAGE_SETTINGS,
+    PAGE_CAMERA, PAGE_RIDE, PAGE_LOCATION, PAGE_TIME, PAGE_CAMINFO, PAGE_SENSORS,
 };
 
 static page_t   s_page = PAGE_BOOT;
@@ -160,6 +176,8 @@ static uint32_t s_rx_fps10 = 0;            /* received frames per second x10 */
 static bool     s_tft_watch = false;       /* TFT self-check active */
 static volatile bool s_show_frames = false;  /* true only on the Camera page (read by on_frame) */
 static uint32_t s_last_fid = 0;            /* last camera frame id seen */
+static bool     s_park_set = false;        /* parking spot saved */
+static double   s_park_lat = 0, s_park_lon = 0;
 static uint32_t s_lost_total = 0;          /* frames lost on the way (frame-id gaps) */
 
 /* 10 s summary (printed on every page) */
@@ -225,6 +243,26 @@ static void start_blink(void)
 /* ---------------------------------------------------------------- */
 
 static char s_bar_cache[24];   /* top bar status as last drawn ("" = redraw) */
+static char s_clock_cache[12]; /* top bar clock as last drawn */
+
+/* top bar left: GPS time (HH:MM) once known, else the name */
+static void top_bar_clock(void)
+{
+    bv_gps_t g;
+    bv_gps_get(&g);
+    char buf[12];
+    if (g.time_valid) {
+        snprintf(buf, sizeof(buf), "%02u:%02u", g.hh, g.mm);
+    } else {
+        snprintf(buf, sizeof(buf), "BikeVision");
+    }
+    if (strcmp(buf, s_clock_cache) == 0) {
+        return;
+    }
+    strcpy(s_clock_cache, buf);
+    tft.fillRect(0, 0, 80, 16, C_BAR);
+    text_at(6, 4, 1, C_TEXT, buf);
+}
 
 static void top_bar_status(void)
 {
@@ -247,8 +285,9 @@ static void top_bar_status(void)
 static void top_bar(const char *title)
 {
     s_bar_cache[0] = 0;
+    s_clock_cache[0] = 0;
     tft.fillRect(0, 0, 320, 16, C_BAR);
-    text_at(6, 4, 1, C_TEXT, "BikeVision");
+    top_bar_clock();
     text_center(title, 1, 4, C_ACCENT);
     top_bar_status();
 }
@@ -293,17 +332,13 @@ static void icon(int i, int16_t ix, int16_t iy, uint16_t c, uint16_t bg)
         tft.fillRect(ix + 16, iy + 7, 4, 16, c);
         tft.fillRect(ix + 23, iy + 2, 3, 21, c);
         break;
-    default: /* settings: gear */
-        tft.drawCircle(ix + 13, iy + 12, 8, c);
-        tft.fillCircle(ix + 13, iy + 12, 3, c);
-        tft.drawLine(ix + 13, iy, ix + 13, iy + 3, c);
-        tft.drawLine(ix + 13, iy + 21, ix + 13, iy + 24, c);
-        tft.drawLine(ix + 1, iy + 12, ix + 4, iy + 12, c);
-        tft.drawLine(ix + 22, iy + 12, ix + 25, iy + 12, c);
-        tft.drawLine(ix + 5, iy + 4, ix + 7, iy + 6, c);
-        tft.drawLine(ix + 19, iy + 18, ix + 21, iy + 20, c);
-        tft.drawLine(ix + 5, iy + 20, ix + 7, iy + 18, c);
-        tft.drawLine(ix + 19, iy + 6, ix + 21, iy + 4, c);
+    default: /* sensors: thermometer */
+        tft.drawRoundRect(ix + 9, iy, 8, 17, 4, c);
+        tft.fillCircle(ix + 13, iy + 19, 5, c);
+        tft.fillRect(ix + 12, iy + 7, 3, 10, c);
+        tft.drawLine(ix + 19, iy + 4, ix + 22, iy + 4, c);
+        tft.drawLine(ix + 19, iy + 8, ix + 22, iy + 8, c);
+        tft.drawLine(ix + 19, iy + 12, ix + 22, iy + 12, c);
         break;
     }
 }
@@ -322,11 +357,37 @@ static void tile_value(int i, char *buf, size_t n, uint16_t *color)
             *color = C_WARN;
         }
         break;
-    case 1: snprintf(buf, n, "needs GPS"); break;
-    case 2: snprintf(buf, n, "needs GPS"); break;
-    case 3: snprintf(buf, n, "since power on"); break;
+    case 1: {
+        bv_gps_t g; bv_gps_get(&g);
+        if (g.fix) { snprintf(buf, n, "%.0f km/h", g.speed_kmh); *color = C_TEXT; }
+        else       { snprintf(buf, n, "no GPS fix"); }
+        break;
+    }
+    case 2: {
+        bv_gps_t g; bv_gps_get(&g);
+        if (!g.last_rx_us)  { snprintf(buf, n, "no GPS data"); *color = C_WARN; }
+        else if (g.fix)     { snprintf(buf, n, "GPS %u sat", g.sats); *color = C_OK; }
+        else                { snprintf(buf, n, "searching %u sat", g.sats); *color = C_YELLOW; }
+        break;
+    }
+    case 3: {
+        bv_gps_t g; bv_gps_get(&g);
+        if (g.time_valid) { snprintf(buf, n, "%02u:%02u:%02u", g.hh, g.mm, g.ss); *color = C_TEXT; }
+        else              { snprintf(buf, n, "since power on"); }
+        break;
+    }
     case 4: snprintf(buf, n, "%s", BV_LINK_MODE_NAME); *color = C_ACCENT; break;
-    default: snprintf(buf, n, "brightness"); break;
+    default: {
+        bv_sens_t e; bv_sens_get(&e);
+        if (e.baro != BV_BARO_NONE && e.baro_ok) {
+            snprintf(buf, n, "%.1f C %.0f hPa", e.temp_c, e.press_hpa); *color = C_TEXT;
+        } else if (e.mag != BV_MAG_NONE && e.mag_ok) {
+            snprintf(buf, n, "compass %.0f", e.heading_deg); *color = C_TEXT;
+        } else {
+            snprintf(buf, n, "no sensor"); *color = C_WARN;
+        }
+        break;
+    }
     }
 }
 
@@ -349,7 +410,7 @@ static void draw_tile_value(int i, bool force)
 
 static void draw_tile(int i, bool sel)
 {
-    static const char *LABEL[6] = { "CAMERA", "RIDE", "LOCATION", "TIME", "CAM INFO", "SETTINGS" };
+    static const char *LABEL[6] = { "CAMERA", "RIDE", "LOCATION", "TIME", "CAM INFO", "SENSORS" };
     int16_t x = TILE_X[i % 2], y = TILE_Y[i / 2];
     uint16_t bg = sel ? C_SEL : C_TILE;
     tft.fillRoundRect(x, y, TILE_W, TILE_H, 6, bg);
@@ -385,7 +446,7 @@ static void page_frame(const char *title)
     text_center("press knob = back to menu", 1, 226, C_DIM);
 }
 
-static void show_placeholder(const char *title, const char *line1, const char *line2)
+__attribute__((unused)) static void show_placeholder(const char *title, const char *line1, const char *line2)
 {
     page_frame(title);
     tft.drawRoundRect(20, 40, 280, 160, 8, C_LINE);
@@ -447,25 +508,373 @@ static void show_caminfo(void)
 }
 
 static char s_time_cache[16];
+static char s_date_cache[32];
+static char s_tsrc_cache[40];
+
+static const char *WEEKDAY[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+static const char *MONTH[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+static int weekday(int d, int m, int y)   /* 0 = Sunday (Sakamoto) */
+{
+    static const int t[] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    if (m < 3) y -= 1;
+    return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
+}
 
 static void time_value(bool force)
 {
-    char buf[16];
-    uptime_text(buf, sizeof(buf));
-    if (!force && strcmp(buf, s_time_cache) == 0) {
-        return;
+    bv_gps_t g;
+    bv_gps_get(&g);
+    char buf[16], date[32], src[40];
+    if (g.time_valid) {
+        snprintf(buf, sizeof(buf), "%02u:%02u:%02u", g.hh, g.mm, g.ss);
+        if (g.date_valid) {
+            snprintf(date, sizeof(date), "%s %u %s %u", WEEKDAY[weekday(g.day, g.mon, g.year)],
+                     g.day, MONTH[(g.mon - 1) % 12], g.year);
+        } else {
+            snprintf(date, sizeof(date), "date not known yet");
+        }
+        snprintf(src, sizeof(src), "GPS time (IST)  -  %u satellites", g.sats);
+    } else {
+        uptime_text(buf, sizeof(buf));
+        snprintf(date, sizeof(date), "since power on");
+        if (g.last_rx_us) {
+            snprintf(src, sizeof(src), "waiting for GPS time (%u sat)", g.sats);
+        } else {
+            snprintf(src, sizeof(src), "no GPS data - check wiring");
+        }
     }
-    strcpy(s_time_cache, buf);
-    tft.fillRect(20, 80, 280, CHAR_H(5), C_BG);
-    text_center(buf, 5, 80, C_TEXT);
+    if (force || strcmp(buf, s_time_cache) != 0) {
+        strcpy(s_time_cache, buf);
+        tft.fillRect(20, 70, 280, CHAR_H(5), C_BG);
+        text_center(buf, 5, 70, C_TEXT);
+    }
+    if (force || strcmp(date, s_date_cache) != 0) {
+        strcpy(s_date_cache, date);
+        tft.fillRect(10, 130, 300, CHAR_H(2), C_BG);
+        text_center(date, 2, 130, C_ACCENT);
+    }
+    if (force || strcmp(src, s_tsrc_cache) != 0) {
+        strcpy(s_tsrc_cache, src);
+        tft.fillRect(10, 170, 300, CHAR_H(1), C_BG);
+        text_center(src, 1, 170, g.time_valid ? C_DIM : C_YELLOW);
+    }
 }
 
 static void show_time(void)
 {
     page_frame("TIME");
-    text_center("TIME SINCE POWER ON", 1, 56, C_DIM);
     time_value(true);
-    text_center("Real time + date need the GPS", 1, 150, C_YELLOW);
+}
+
+/* RIDE: big speed + trip numbers */
+static char s_ride_cache[6][24];
+
+static void ride_values(bool force)
+{
+    bv_gps_t g;
+    bv_gps_get(&g);
+    char v[6][24];
+    if (g.fix) snprintf(v[0], 24, "%.0f", g.speed_kmh); else snprintf(v[0], 24, "--");
+    snprintf(v[1], 24, "%.1f km", g.trip_km);
+    snprintf(v[2], 24, "%.0f km/h", g.max_kmh);
+    snprintf(v[3], 24, "%02lu:%02lu", (unsigned long)(g.moving_s / 3600), (unsigned long)((g.moving_s / 60) % 60));
+    float avg = g.moving_s ? g.trip_km * 3600.0f / (float)g.moving_s : 0.0f;
+    snprintf(v[4], 24, "%.0f km/h", avg);
+    if (!g.last_rx_us) snprintf(v[5], 24, "no GPS data");
+    else if (g.fix)    snprintf(v[5], 24, "GPS fix, %u sat", g.sats);
+    else               snprintf(v[5], 24, "searching, %u sat", g.sats);
+
+    if (force || strcmp(v[0], s_ride_cache[0])) {
+        strcpy(s_ride_cache[0], v[0]);
+        tft.fillRect(10, 30, 150, CHAR_H(7), C_BG);
+        text_center_box(v[0], 10, 150, 7, 30, g.fix ? C_TEXT : C_DIM);
+    }
+    static const int16_t Y[4] = { 36, 70, 104, 138 };
+    for (int i = 1; i <= 4; i++) {
+        if (force || strcmp(v[i], s_ride_cache[i])) {
+            strcpy(s_ride_cache[i], v[i]);
+            tft.fillRect(176, Y[i - 1] + 12, 140, CHAR_H(2), C_BG);
+            text_at(176, Y[i - 1] + 12, 2, C_TEXT, v[i]);
+        }
+    }
+    if (force || strcmp(v[5], s_ride_cache[5])) {
+        strcpy(s_ride_cache[5], v[5]);
+        tft.fillRect(10, 190, 300, CHAR_H(1), C_BG);
+        text_center(v[5], 1, 190, g.fix ? C_OK : C_YELLOW);
+    }
+}
+
+static void show_ride(void)
+{
+    page_frame("RIDE");
+    text_center_box("km/h", 10, 150, 2, 92, C_DIM);
+    static const char *L[4] = { "TRIP", "MAX", "RIDE TIME", "AVERAGE" };
+    static const int16_t Y[4] = { 36, 70, 104, 138 };
+    for (int i = 0; i < 4; i++) text_at(176, Y[i], 1, C_DIM, L[i]);
+    tft.drawFastVLine(166, 30, 150, C_LINE);
+    text_center("hold knob = reset trip", 1, 206, C_DIM);
+    ride_values(true);
+}
+
+/* LOCATION: position + back-to-parking */
+static char s_loc_cache[8][28];
+static int16_t s_arrow_deg = -1000;
+
+static const char *compass_point(double deg)
+{
+    static const char *P[8] = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+    int i = (int)((deg + 22.5) / 45.0) % 8;
+    return P[i < 0 ? 0 : i];
+}
+
+static void park_load(void)
+{
+    nvs_handle_t h;
+    double v[2];
+    size_t n = sizeof(v);
+    if (nvs_open("bv_gps", NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_blob(h, "park", v, &n) == ESP_OK && n == sizeof(v)) {
+            s_park_set = true;
+            s_park_lat = v[0];
+            s_park_lon = v[1];
+        }
+        nvs_close(h);
+    }
+}
+
+static void park_save(double lat, double lon)
+{
+    nvs_handle_t h;
+    double v[2] = { lat, lon };
+    s_park_set = true;
+    s_park_lat = lat;
+    s_park_lon = lon;
+    if (nvs_open("bv_gps", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_blob(h, "park", v, sizeof(v));
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "Parking spot saved: %.6f, %.6f", lat, lon);
+}
+
+/* arrow in a circle (centre 70,120, r 46), 0 = up */
+static void draw_arrow(int16_t deg, uint16_t color)
+{
+    const int16_t cx = 70, cy = 118;
+    double a = deg * M_PI / 180.0;
+    double sx = sin(a), cy_ = -cos(a);
+    int16_t tipx = cx + (int16_t)(sx * 36), tipy = cy + (int16_t)(cy_ * 36);
+    int16_t bx = cx - (int16_t)(sx * 18), by = cy - (int16_t)(cy_ * 18);
+    int16_t lx = bx + (int16_t)(cy_ * 14), ly = by - (int16_t)(sx * 14);
+    int16_t rx = bx - (int16_t)(cy_ * 14), ry = by + (int16_t)(sx * 14);
+    tft.fillTriangle(tipx, tipy, lx, ly, cx, cy, color);
+    tft.fillTriangle(tipx, tipy, rx, ry, cx, cy, color);
+}
+
+static void loc_values(bool force)
+{
+    bv_gps_t g;
+    bv_gps_get(&g);
+    char v[8][28];
+    if (g.fix) {
+        snprintf(v[0], 28, "%.5f %c", fabs(g.lat), g.lat >= 0 ? 'N' : 'S');
+        snprintf(v[1], 28, "%.5f %c", fabs(g.lon), g.lon >= 0 ? 'E' : 'W');
+        snprintf(v[2], 28, "%.0f m", g.alt_m);
+    } else {
+        snprintf(v[0], 28, "--");
+        snprintf(v[1], 28, "--");
+        snprintf(v[2], 28, "--");
+    }
+    snprintf(v[3], 28, "%u (HDOP %.1f)", g.sats, g.hdop > 50 ? 0.0f : g.hdop);
+    /* heading: GPS while moving; stopped: the compass (if calibrated) */
+    bv_sens_t e;
+    bv_sens_get(&e);
+    bool use_mag = !g.course_valid && e.mag_ok && e.mag_cal;
+    if (g.course_valid) snprintf(v[4], 28, "%s %.0f", compass_point(g.course_deg), g.course_deg);
+    else if (use_mag) snprintf(v[4], 28, "%s %.0f compass", compass_point(e.heading_deg), e.heading_deg);
+    else snprintf(v[4], 28, "-- (stopped)");
+
+    int16_t arrow = -1000;
+    if (!s_park_set) {
+        snprintf(v[5], 28, "no spot saved");
+        snprintf(v[6], 28, "hold knob to save");
+    } else if (!g.fix) {
+        snprintf(v[5], 28, "waiting for GPS");
+        snprintf(v[6], 28, " ");
+    } else {
+        double d = bv_gps_distance_m(g.lat, g.lon, s_park_lat, s_park_lon);
+        double b = bv_gps_bearing_deg(g.lat, g.lon, s_park_lat, s_park_lon);
+        if (d < 1000) snprintf(v[5], 28, "%.0f m", d);
+        else snprintf(v[5], 28, "%.1f km", d / 1000.0);
+        /* moving: arrow relative to the riding direction; stopped: north up */
+        double rel = g.course_valid ? b - g.course_deg : use_mag ? b - e.heading_deg : b;
+        while (rel < 0) rel += 360;
+        while (rel >= 360) rel -= 360;
+        arrow = (int16_t)rel;
+        snprintf(v[6], 28, "%s %.0f %s", compass_point(b), b, (g.course_valid || use_mag) ? "(ahead = up)" : "(north = up)");
+    }
+    if (!g.last_rx_us) snprintf(v[7], 28, "no GPS data");
+    else if (g.fix) snprintf(v[7], 28, "GPS fix");
+    else snprintf(v[7], 28, "searching sats");
+
+    static const int16_t Y[5] = { 30, 58, 86, 114, 142 };
+    for (int i = 0; i < 5; i++) {
+        if (force || strcmp(v[i], s_loc_cache[i])) {
+            strcpy(s_loc_cache[i], v[i]);
+            tft.fillRect(184, Y[i] + 10, 134, CHAR_H(1) + 4, C_BG);
+            text_at(184, Y[i] + 12, i < 2 ? 1 : 1, C_TEXT, v[i]);
+        }
+    }
+    /* parking block under the arrow */
+    if (force || strcmp(v[5], s_loc_cache[5])) {
+        strcpy(s_loc_cache[5], v[5]);
+        tft.fillRect(4, 172, 160, CHAR_H(2), C_BG);
+        text_center_box(v[5], 4, 132, 2, 172, s_park_set && g.fix ? C_ACCENT : C_DIM);
+    }
+    if (force || strcmp(v[6], s_loc_cache[6])) {
+        strcpy(s_loc_cache[6], v[6]);
+        tft.fillRect(4, 192, 176, CHAR_H(1), C_BG);
+        text_at(8, 192, 1, C_DIM, v[6]);
+    }
+    if (force || strcmp(v[7], s_loc_cache[7])) {
+        strcpy(s_loc_cache[7], v[7]);
+        tft.fillRect(184, 172, 134, CHAR_H(1), C_BG);
+        text_at(184, 172, 1, g.fix ? C_OK : C_YELLOW, v[7]);
+    }
+    if (force || arrow != s_arrow_deg) {
+        if (s_arrow_deg > -1000 && !force) {
+            draw_arrow(s_arrow_deg, C_BG);         /* erase the old arrow */
+        }
+        if (force) {
+            tft.fillCircle(70, 118, 44, C_BG);
+        }
+        tft.drawCircle(70, 118, 46, C_LINE);
+        text_at(67, 66, 1, C_DIM, "N");
+        if (arrow > -1000) {
+            draw_arrow(arrow, C_ACCENT);
+        } else {
+            tft.fillCircle(70, 118, 3, C_DIM);
+        }
+        s_arrow_deg = arrow;
+    }
+}
+
+static void show_location(void)
+{
+    page_frame("LOCATION");
+    static const char *L[5] = { "LATITUDE", "LONGITUDE", "ALTITUDE", "SATELLITES", "HEADING" };
+    static const int16_t Y[5] = { 30, 58, 86, 114, 142 };
+    for (int i = 0; i < 5; i++) text_at(184, Y[i], 1, C_DIM, L[i]);
+    text_at(8, 22, 1, C_DIM, "BACK TO PARKING");
+    tft.drawFastVLine(178, 22, 196, C_LINE);
+    text_center("hold knob = save parking spot", 1, 212, C_DIM);
+    s_arrow_deg = -1000;
+    loc_values(true);
+}
+
+/* SENSORS: HW-611 (BMP280 / BME280) + GY-271 compass */
+static char s_sens_cache[10][28];
+static int16_t s_needle_deg = -1000;
+
+#define SN_CX  70
+#define SN_CY  86
+#define SN_R   46
+static const int16_t SN_Y[7] = { 20, 48, 76, 104, 132, 160, 188 };
+
+/* needle in the left dial: points to north (0 = up) */
+static void draw_needle(int16_t deg, bool erase)
+{
+    double a = deg * M_PI / 180.0;
+    double sx = sin(a), cy_ = -cos(a);
+    int16_t nx = SN_CX + (int16_t)(sx * 38), ny = SN_CY + (int16_t)(cy_ * 38);
+    int16_t tx = SN_CX - (int16_t)(sx * 30), ty = SN_CY - (int16_t)(cy_ * 30);
+    int16_t lx = SN_CX + (int16_t)(cy_ * 7), ly = SN_CY - (int16_t)(sx * 7);
+    int16_t rx = SN_CX - (int16_t)(cy_ * 7), ry = SN_CY + (int16_t)(sx * 7);
+    tft.fillTriangle(nx, ny, lx, ly, rx, ry, erase ? C_BG : TFT_RED);
+    tft.fillTriangle(tx, ty, lx, ly, rx, ry, erase ? C_BG : C_TEXT);
+}
+
+static void sens_values(bool force)
+{
+    bv_sens_t e;
+    bv_sens_get(&e);
+    char v[10][28];
+    bool b = e.baro != BV_BARO_NONE && e.baro_ok;
+    if (b) {
+        snprintf(v[0], 28, "%.1f C", e.temp_c);
+        if (e.hum_pct >= 0) snprintf(v[1], 28, "%.0f %%", e.hum_pct);
+        else snprintf(v[1], 28, "n/a");
+        snprintf(v[2], 28, "%.1f hPa", e.press_hpa);
+        snprintf(v[3], 28, "%.0f m", e.alt_m);
+        snprintf(v[4], 28, "%+.1f m/min", e.climb_m_min);
+        snprintf(v[5], 28, "%.0f m", e.ascent_m);
+    } else {
+        for (int i = 0; i < 6; i++) snprintf(v[i], 28, "--");
+    }
+    bool m = e.mag != BV_MAG_NONE && e.mag_ok;
+    if (m) snprintf(v[6], 28, "%s %.0f", compass_point(e.heading_deg), e.heading_deg);
+    else snprintf(v[6], 28, "--");
+
+    /* chips found (left, under the dial) */
+    if (e.baro != BV_BARO_NONE) snprintf(v[7], 28, "%s 0x%02X%s", bv_sens_baro_name(e.baro), e.baro_addr, e.baro_ok ? "" : " ERR");
+    else snprintf(v[7], 28, "no BMP/BME280");
+    if (e.mag != BV_MAG_NONE) snprintf(v[8], 28, "%s 0x%02X%s", bv_sens_mag_name(e.mag), e.mag_addr, e.mag_ok ? "" : " ERR");
+    else snprintf(v[8], 28, "no compass");
+    if (e.cal_running) snprintf(v[9], 28, "TURN BOARD: %u s", e.cal_left_s);
+    else if (m && !e.mag_cal) snprintf(v[9], 28, "compass not calibrated");
+    else if (m) snprintf(v[9], 28, "compass calibrated");
+    else snprintf(v[9], 28, " ");
+
+    for (int i = 0; i < 7; i++) {
+        if (force || strcmp(v[i], s_sens_cache[i])) {
+            strcpy(s_sens_cache[i], v[i]);
+            tft.fillRect(184, SN_Y[i] + 10, 134, CHAR_H(2), C_BG);
+            uint16_t col = C_TEXT;
+            if (i == 3) col = e.alt_from_gps ? C_TEXT : C_YELLOW;   /* not set from GPS yet */
+            if (i == 6 && m && !e.mag_cal) col = C_YELLOW;
+            text_at(184, SN_Y[i] + 10, 2, (strcmp(v[i], "--") && strcmp(v[i], "n/a")) ? col : C_DIM, v[i]);
+        }
+    }
+    static const int16_t LY[3] = { 146, 158, 174 };
+    for (int i = 7; i < 10; i++) {
+        if (force || strcmp(v[i], s_sens_cache[i])) {
+            strcpy(s_sens_cache[i], v[i]);
+            tft.fillRect(4, LY[i - 7], 172, CHAR_H(1), C_BG);
+            uint16_t col = C_DIM;
+            if (i == 9) col = e.cal_running ? C_ACCENT : (m && !e.mag_cal) ? C_YELLOW : C_OK;
+            else if (strstr(v[i], "ERR") || strncmp(v[i], "no ", 3) == 0) col = C_WARN;
+            else col = C_OK;
+            text_at(8, LY[i - 7], 1, col, v[i]);
+        }
+    }
+
+    /* dial: red end points to north */
+    int16_t needle = m ? (int16_t)((360 - (int)e.heading_deg) % 360) : -1000;
+    if (force || needle != s_needle_deg) {
+        if (s_needle_deg > -1000 && !force) draw_needle(s_needle_deg, true);
+        if (force) tft.fillCircle(SN_CX, SN_CY, SN_R - 2, C_BG);
+        tft.drawCircle(SN_CX, SN_CY, SN_R, C_LINE);
+        text_at(SN_CX - 2, SN_CY - SN_R - 10, 1, C_DIM, "^");
+        if (needle > -1000) draw_needle(needle, false);
+        else tft.fillCircle(SN_CX, SN_CY, 3, C_DIM);
+        tft.fillCircle(SN_CX, SN_CY, 2, C_LINE);
+        s_needle_deg = needle;
+    }
+}
+
+static void show_sensors(void)
+{
+    page_frame("SENSORS");
+    static const char *L[7] = { "TEMPERATURE", "HUMIDITY", "PRESSURE", "ALTITUDE (BARO)",
+                                 "CLIMB RATE", "TOTAL CLIMB", "HEADING" };
+    for (int i = 0; i < 7; i++) text_at(184, SN_Y[i], 1, C_DIM, L[i]);
+    tft.drawFastVLine(178, 20, 196, C_LINE);
+    text_at(8, 194, 1, C_DIM, "hold knob = calibrate");
+    text_at(8, 204, 1, C_DIM, "compass (turn it 20 s)");
+    s_needle_deg = -1000;
+    sens_values(true);
 }
 
 /* ---------------------------------------------------------------- */
@@ -491,9 +900,9 @@ static void open_page(page_t p)
         break;
     case PAGE_CAMINFO:  show_caminfo(); break;
     case PAGE_TIME:     show_time(); break;
-    case PAGE_RIDE:     show_placeholder("RIDE", "Needs the GPS", "speed, trip, ride time"); break;
-    case PAGE_LOCATION: show_placeholder("LOCATION", "Needs the GPS", "back to parking, heading, lat / lon"); break;
-    case PAGE_SETTINGS: show_placeholder("SETTINGS", "Coming soon", "brightness, link, fps limit"); break;
+    case PAGE_RIDE:     show_ride(); break;
+    case PAGE_LOCATION: show_location(); break;
+    case PAGE_SENSORS:  show_sensors(); break;
     default: break;
     }
 }
@@ -606,6 +1015,31 @@ static void handle_input(const bv_input_event_t *ev)
     if (s_page == PAGE_BOOT) {
         return;
     }
+    if (ev->type == BV_IN_LONG && s_page == PAGE_RIDE) {
+        bv_gps_trip_reset();
+        ESP_LOGI(TAG, "Trip reset");
+        ride_values(true);
+        return;
+    }
+    if (ev->type == BV_IN_LONG && s_page == PAGE_SENSORS) {
+        bv_sens_cal_start();
+        ESP_LOGI(TAG, "Compass calibration requested");
+        return;
+    }
+    if (ev->type == BV_IN_LONG && s_page == PAGE_LOCATION) {
+        bv_gps_t g;
+        bv_gps_get(&g);
+        if (g.fix) {
+            park_save(g.lat, g.lon);
+            text_center("PARKING SPOT SAVED", 2, 100, C_OK);
+            vTaskDelay(pdMS_TO_TICKS(800));
+        } else {
+            text_center("NO GPS FIX - NOT SAVED", 2, 100, C_WARN);
+            vTaskDelay(pdMS_TO_TICKS(800));
+        }
+        show_location();
+        return;
+    }
     if (ev->type == BV_IN_LONG) {
         open_page(PAGE_MENU);    /* back to the menu from any page */
     } else if (ev->type == BV_IN_PRESS) {
@@ -632,8 +1066,9 @@ static void ui_tick(void)
 
     switch (s_page) {
     case PAGE_MENU:
+        top_bar_clock();
         top_bar_status();
-        draw_tile_value(0, false);
+        for (int i = 0; i < 6; i++) draw_tile_value(i, false);
         break;
     case PAGE_CAMERA:
         if (s_on_start_screen) {
@@ -641,15 +1076,29 @@ static void ui_tick(void)
         }
         break;
     case PAGE_CAMINFO:
+        top_bar_clock();
         top_bar_status();
         info_values(false);
         break;
     case PAGE_TIME:
+        top_bar_clock();
         top_bar_status();
         time_value(false);
         break;
-    case PAGE_RIDE: case PAGE_LOCATION: case PAGE_SETTINGS:
+    case PAGE_RIDE:
+        top_bar_clock();
         top_bar_status();
+        ride_values(false);
+        break;
+    case PAGE_LOCATION:
+        top_bar_clock();
+        top_bar_status();
+        loc_values(false);
+        break;
+    case PAGE_SENSORS:
+        top_bar_clock();
+        top_bar_status();
+        sens_values(false);
         break;
     default:
         break;
@@ -919,6 +1368,7 @@ extern "C" void app_main(void)
 
     /* drawJpegBuffer() logs ~7 info lines per frame; keep only warnings */
     esp_log_level_set("TFT_JPEG", ESP_LOG_WARN);
+    esp_log_level_set("JPEG", ESP_LOG_WARN);       /* 2 lines per frame otherwise */
 
     tft.begin();                     /* V1.0 default pins */
     tft.setFrequency(TFT_SPI_HZ);
@@ -949,9 +1399,20 @@ extern "C" void app_main(void)
     }
 #endif
 
+    if (bv_gps_start() != ESP_OK) {
+        ESP_LOGE(TAG, "GPS UART failed to start");
+    }
+
     xTaskCreate(display_task, "display", 8192, NULL, 5, NULL);
 
-    ESP_ERROR_CHECK(espnow_link_radio_start(0));
+    ESP_ERROR_CHECK(espnow_link_radio_start(0));   /* also starts NVS */
+    park_load();
+    if (s_park_set) {
+        ESP_LOGI(TAG, "Parking spot loaded: %.6f, %.6f", s_park_lat, s_park_lon);
+    }
+    if (bv_sens_start() != ESP_OK) {      /* after NVS (compass calibration) */
+        ESP_LOGE(TAG, "I2C sensors failed to start");
+    }
 
     espnow_link_config_t cfg = {};
     cfg.role = ESPNOW_LINK_RECEIVER;
