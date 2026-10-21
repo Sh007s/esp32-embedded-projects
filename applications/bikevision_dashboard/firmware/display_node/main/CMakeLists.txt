@@ -5,6 +5,7 @@
 idf_component_register(
     SRCS
         "display_main.cpp"
+        "bv_input.c"
         "tft.cpp"
     INCLUDE_DIRS
         "."

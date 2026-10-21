@@ -234,6 +234,10 @@ public:
     uint8_t readcommand8(uint8_t command,
                          uint8_t index = 0);
 
+    // BikeVision: set the ILI9341 up again after it reset itself (white
+    // screen). Hardware reset + init sequence + rotation; SPI bus untouched.
+    void reinit();
+
 private:
     // ========================================================
     // TFT FILE

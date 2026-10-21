@@ -4457,3 +4457,12 @@ void TFT::GIF_freeMemory()
 
     gif_debug_state = GIF_DEBUG_IDLE;
 }
+
+// BikeVision: TFT self-check recovery (called only from the display task,
+// between frames). The SPI bus and device stay as they are.
+void TFT::reinit()
+{
+    hwReset();
+    init();
+    setRotation(_rotation);
+}
